@@ -22,6 +22,7 @@
           <button type="button" class="step-pill" data-step="3">3. Результат</button>
           <button type="button" class="step-pill" data-step="4">4. Фільтри</button>
           <button type="button" class="step-pill" data-step="5">5. SQL</button>
+          <button type="button" class="step-pill" data-step="6">6. Шаблони</button>
         </nav>
       </header>
 
@@ -93,6 +94,12 @@
               рядки.
             </p>
 
+            <div class="block">
+              <h3 class="block-title">Готові показники</h3>
+              <p class="hint">Показники враховують зернистість і не підміняють кількість осіб кількістю рядків.</p>
+              <div id="metrics-list" class="quick-filters"></div>
+            </div>
+
             <div class="result-builder" id="result-builder">
               <div class="result-col result-available">
                 <h3 class="col-head">Доступні поля</h3>
@@ -151,6 +158,31 @@
             </p>
           </section>
 
+          <section class="panel" data-step="6">
+            <h2>Шаблони SQL</h2>
+            <p class="sub">
+              Тут зберігаються стандартизовані скрипти для створення таблиць,
+              вибірки даних та інших повторюваних задач.
+            </p>
+            <div class="template-settings" id="template-settings">
+              <div class="template-settings-row">
+                <label>
+                  Рік
+                  <input id="tpl-year" type="number" min="2000" max="2100" value="2026" />
+                </label>
+                <label>
+                  Місяць від
+                  <input id="tpl-month-start" type="number" min="1" max="12" value="1" />
+                </label>
+                <label>
+                  Місяць до
+                  <input id="tpl-month-end" type="number" min="1" max="12" value="6" />
+                </label>
+              </div>
+            </div>
+            <div id="templates-list" class="presets"></div>
+          </section>
+
           <div class="nav">
             <button type="button" class="btn secondary" id="btn-back" disabled>
               Назад
@@ -164,6 +196,7 @@
           <p class="muted" style="margin: 0; font-size: 0.9rem">
             Оновлюється під час вибору на будь-якому кроці.
           </p>
+          <div id="sql-status" class="sql-status" role="alert" aria-live="polite"></div>
           <div class="sql-actions">
             <button type="button" class="btn" id="btn-copy">Копіювати</button>
             <button type="button" class="btn ghost" id="btn-download">

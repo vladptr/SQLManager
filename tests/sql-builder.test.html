@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="uk">
+<meta charset="utf-8">
+<title>SQL builder tests</title>
+<pre id="results">RUNNING</pre>
+<script src="../data/schema.js"></script>
+<script src="../js/sql-builder.js"></script>
+<script>
+  const results = [];
+  function test(name, fn) {
+    try { fn(); results.push({ name, ok: true }); }
+    catch (error) { results.push({ name, ok: false, error: error.message }); }
+  }
+  function state(tables, extra = {}) {
+    return Object.assign({ tables, fields: [], filters: [], orderBy: [], mode: "select" }, extra);
+  }
+  function result(input) {
+    return SqlBuilder.build(input);
+  }
+  function includes(value, part, message = part) {
+    if (!value.includes(part)) throw new Error(`Не знайдено: ${message}\n${value}`);
+  }
+  function equal(a, b, message) {
+    if (a !== b) throw new Error(`${message || "Значення різняться"}\n${a}\n---\n${b}`);
+  }
+
+  test("порядок вибору таблиць не змінює SQL", () => {
+    const a = result(state(["t6_2026_edrpou", "insured_person_info"]));
+    const b = result(state(["insured_person_info", "t6_2026_edrpou"]));
+    equal(a.sql, b.sql);
+  });
+  test("три таблиці з проміжним зв’язком", () => {
+    const r = result(state(["pinsur_ankt_a", "pinsur_main", "pinsur_chng_doc"]));
+    equal(r.errors.length, 0);
+    equal((r.sql.match(/\bJOIN\b/g) || []).length, 2);
+  });
+  test("непов’язаний граф повертає помилку без SQL", () => {
+    const r = result(state(["insured_person", "mrdorg"]));
+    if (!r.errors.length || r.sql) throw new Error("Очікувалася помилка непов’язаного графа");
+  });
+  test("складений JOIN APE46–APE45", () => {
+    const r = result(state(["sm_ape4_6data", "sm_ape4_5data"]));
+    includes(r.sql, "aped46_slb"); includes(r.sql, "aped45_slb");
+    includes(r.sql, "aped46_numident"); includes(r.sql, "aped45_numident");
+  });
+  test("альтернативний JOIN особи використовує РНОКПП або паспортний ключ", () => {
+    const joins = SqlBuilder.suggestJoinsForTables(["t6_2026_edrpou", "insured_person_info"]);
+    joins[0].selectedVariant = "numident_or_passport";
+    const r = result(state(["t6_2026_edrpou", "insured_person_info"], { joins }));
+    includes(r.sql, "latest_person_identity");
+    includes(r.sql, "sqlm_match_key");
+    includes(r.sql, "'БК' || UPPER(TRIM(ipi_src.pass_serial))");
+    includes(r.sql, "'П' || TRIM(ipi_src.pass_number)");
+  });
+  test("COUNT DISTINCT осіб", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["people_count"] }));
+    includes(r.sql, "COUNT(DISTINCT t6.kod_zo)");
+  });
+  test("сторнування фонду оплати", () => {
+    const r = result(state(["sm_packlabel", "sm_ape4_6data"], { metrics: ["raw_payroll"] }));
+    includes(r.sql, "IN (3, 5, 7, 9, 12)"); includes(r.sql, "-ABS(pd.aped46_sum)");
+  });
+  test("DATE-фільтр перевіряється і форматується", () => {
+    const good = result(state(["insured_person_info"], { filters: [{ table: "insured_person_info", column: "birth_dt", op: ">=", value: "2026-01-31" }] }));
+    includes(good.sql, "DATE '2026-01-31'");
+    const bad = result(state(["insured_person_info"], { filters: [{ table: "insured_person_info", column: "birth_dt", op: "=", value: "31.01.2026" }] }));
+    if (!bad.errors.length) throw new Error("Некоректна дата не відхилена");
+  });
+  test("LIKE без регістру застосовує UPPER з обох боків", () => {
+    const r = result(state(["insured_person_info"], { filters: [{ table: "insured_person_info", column: "ln_name", op: "LIKE_UPPER", value: "Іван" }] }));
+    includes(r.sql, "UPPER(ipi.ln_name) LIKE UPPER('%Іван%')");
+  });
+  test("CTAS відхиляє дубльовані технічні аліаси", () => {
+    const fields = [
+      { table: "insured_person_info", column: "ln_name", outAlias: "name" },
+      { table: "insured_person_info", column: "fn_name", outAlias: "NAME" }
+    ];
+    const r = result(state(["insured_person_info"], { mode: "ctas", targetTable: "work_result", fields }));
+    if (!r.errors.length) throw new Error("Дубльовані аліаси не відхилені");
+  });
+
+  const failed = results.filter(x => !x.ok);
+  document.querySelector("#results").textContent = JSON.stringify({ passed: results.length - failed.length, failed: failed.length, results }, null, 2);
+  document.title = failed.length ? `FAIL ${failed.length}` : `PASS ${results.length}`;
+</script>
+</html>

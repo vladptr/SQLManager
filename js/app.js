@@ -6,10 +6,68 @@
     fields: [],
     filters: [],
     orderBy: [],
+    metrics: [],
     mode: "select",
     targetTable: "work_result",
   };
-  const MAX_STEP = 5;
+  const MAX_STEP = 6;
+  const TEMPLATE_SCRIPTS = [
+    {
+      id: "t6_2026_edrpou",
+      title: "Створити t6_2026_edrpou",
+      description:
+        "Скрипт для створення таблиці t6_2026_edrpou з пакета T6 за 2026 рік.",
+      sql: `drop table t6_2026_edrpou purge;
+create table t6_2026_edrpou as
+select /*+parallel(pd,8)*/
+       lpad(mrd.mrd_reg_code, 2,0) reg,
+       slb_im,
+       ian_numident edrpou,
+       ian_name1,
+       pd.aped46_numident kod_zo,
+       cs_pfu.dwh_common.getdatefromnumident(aped46_numident) as birth_dt,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum) * -1 else pd.aped46_sum end) sum_narah,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum_pv) * -1 else pd.aped46_sum_pv end) sum_vrah,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum_narah) * -1 else pd.aped46_sum_narah end) sum_narah_vnes,
+       nvl(pd.aped46_mnth, plb.slb_charg_mnth) aped46_mnth,
+       nvl(pd.aped46_year, plb.slb_charg_year) year,
+       aped46_zo kat_zo,
+       case
+         when aped46_numident is not null
+           and aped46_numident not like '00000%'
+           and regexp_instr(aped46_numident, '\\D') = 0
+         then mod(substr(aped46_numident, length(aped46_numident) - 1, 1), 2)
+         else aped46_sex
+       end sex
+from ikis_websm.sm_packlabel plb
+join ikis_websm.sm_ape4_6data pd on plb.slb_id = pd.aped46_slb
+join ikis_sys.mrdorg mrd on plb.slb_org_mdzu = mrd.mrd_code
+join ikis_ersp.pinsur_main im on plb.slb_im = im.im_id
+join ikis_ersp.pinsur_chng_doc chd on im.im_ih = chd.ih_id
+join ikis_ersp.pinsur_ankt_a ankt on chd.ih_ian = ankt.ian_id
+where plb.slb_fixed = 'Y'
+  and plb.slb_actuality = 'Y'
+  and plb.slb_st = 'O'
+  and pd.aped46_st = 'O'
+  and nvl(pd.aped46_year, plb.slb_charg_year) = {{YEAR}}
+  and nvl(aped46_mnth, slb_charg_mnth) between {{MONTH_START}} and {{MONTH_END}}
+group by lpad(mrd.mrd_reg_code, 2,0),
+         slb_im,
+         ian_numident,
+         pd.aped46_numident,
+         aped46_zo,
+         nvl(pd.aped46_year, plb.slb_charg_year),
+         nvl(pd.aped46_mnth, plb.slb_charg_mnth),
+         aped46_sex,
+         ian_name1;
+
+
+
+
+
+`,
+      },
+  ];
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   function tLabel(id) {
@@ -77,6 +135,10 @@
     else state.tables.push(id);
     state.joins = SqlBuilder.suggestJoinsForTables(state.tables);
     state.fields = state.fields.filter((f) => state.tables.includes(f.table));
+    state.metrics = state.metrics.filter((id) => {
+      const metric = SQL_SCHEMA.metrics.find((m) => m.id === id);
+      return metric && metric.tables.every((tableId) => state.tables.includes(tableId));
+    });
     state.filters = state.filters.filter((f) => state.tables.includes(f.table));
     state.orderBy = state.orderBy.filter((o) => {
       if (o.fieldIndex != null) return o.fieldIndex < state.fields.length;
@@ -119,81 +181,35 @@
         "Одне джерело — з’єднувати нічого. Переходьте до «Результат».";
       return;
     }
-    hint.textContent =
-      "Оберіть поля, за якими рядки вважаються «одними й тими самими» між джерелами. Якщо зв’язок відомий системі — він уже підставлений.";
+    hint.textContent = "Зв’язки будуються автоматично як граф. Порядок вибору джерел не впливає на SQL.";
     state.joins.forEach((j, idx) => root.appendChild(joinRow(j, idx)));
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "btn ghost";
-    add.textContent = "+ Ще одне з’єднання";
-    add.addEventListener("click", () => {
-      const a = state.tables[0];
-      const b = state.tables[1] || a;
-      state.joins.push({
-        leftTable: a,
-        rightTable: b,
-        leftCol: SQL_SCHEMA.getTable(a)?.columns[0]?.name || "",
-        rightCol: SQL_SCHEMA.getTable(b)?.columns[0]?.name || "",
-        type: "INNER",
-      });
-      renderJoins();
-      updateSql();
-    });
-    root.appendChild(add);
   }
   function joinRow(j, idx) {
     const row = document.createElement("div");
     row.className = "join-row";
-    const typeOpts = SQL_SCHEMA.joinTypes
-      .map(
-        (t) =>
-          `<option value="${t.id}" ${t.id === j.type ? "selected" : ""}>${t.label}</option>`
-      )
-      .join("");
-    const leftTables = state.tables
-      .map(
-        (id) =>
-          `<option value="${id}" ${id === j.leftTable ? "selected" : ""}>${tLabel(id)}</option>`
-      )
-      .join("");
-    const rightTables = state.tables
-      .map(
-        (id) =>
-          `<option value="${id}" ${id === j.rightTable ? "selected" : ""}>${tLabel(id)}</option>`
-      )
-      .join("");
+    const conditions = (j.conditions || []).map((condition) =>
+      `<div class="join-line"><code>${cLabel(j.leftTable, condition.leftCol)}</code><span class="join-word">=</span><code>${cLabel(j.rightTable, condition.rightCol)}</code></div>`
+    ).join("");
+    const variants = (j.variants || []).map((variant) =>
+      `<option value="${variant.id}" ${variant.id === j.selectedVariant ? "selected" : ""}>${variant.label}</option>`
+    ).join("");
     row.innerHTML = `
       <div class="join-plain">
         <div class="join-line">
-          <span class="join-word">Тип:</span>
-          <select data-k="type" class="join-type">${typeOpts}</select>
+          <strong>${tLabel(j.leftTable)}</strong><span class="join-word">→</span><strong>${tLabel(j.rightTable)}</strong>
+          <span class="badge">${j.type} · ${j.cardinality || "невідомо"}</span>
         </div>
-        <div class="join-line">
-          <select data-k="leftTable">${leftTables}</select>
-          <select data-k="leftCol">${colOptions(j.leftTable, j.leftCol)}</select>
-          <span class="join-word">=</span>
-          <select data-k="rightTable">${rightTables}</select>
-          <select data-k="rightCol">${colOptions(j.rightTable, j.rightCol)}</select>
-          <button type="button" class="btn danger icon" data-del>×</button>
-        </div>
+        ${variants ? `<label class="join-line"><span class="join-word">Спосіб зіставлення:</span><select data-join-variant>${variants}</select></label>` : ""}
+        ${conditions}
         ${j.note ? `<div class="join-note">${j.note}</div>` : ""}
       </div>
     `;
-    $$("select", row).forEach((sel) => {
-      sel.addEventListener("change", () => {
-        j[sel.dataset.k] = sel.value;
-        if (sel.dataset.k === "leftTable") {
-          j.leftCol = SQL_SCHEMA.getTable(j.leftTable)?.columns[0]?.name || "";
-        }
-        if (sel.dataset.k === "rightTable") {
-          j.rightCol = SQL_SCHEMA.getTable(j.rightTable)?.columns[0]?.name || "";
-        }
-        renderJoins();
-        updateSql();
-      });
-    });
-    $("[data-del]", row).addEventListener("click", () => {
-      state.joins.splice(idx, 1);
+    $("[data-join-variant]", row)?.addEventListener("change", (event) => {
+      j.selectedVariant = event.target.value;
+      const variant = j.variants.find((item) => item.id === j.selectedVariant);
+      j.conditions = variant.conditions.map((item) => ({ ...item }));
+      j.leftSource = variant.leftSource || j.leftSource;
+      j.rightSource = variant.rightSource || j.rightSource;
       renderJoins();
       updateSql();
     });
@@ -218,6 +234,7 @@
     const emptyHint = $("#fields-empty-hint");
     const countEl = $("#chosen-count");
     if (!avail || !chosen) return;
+    renderMetrics();
     avail.innerHTML = "";
     chosen.innerHTML = "";
     if (!state.tables.length) {
@@ -344,6 +361,26 @@
       });
       chosen.appendChild(card);
     });
+  }
+  function renderMetrics() {
+    const root = $("#metrics-list");
+    if (!root) return;
+    root.innerHTML = "";
+    SQL_SCHEMA.metrics
+      .filter((metric) => metric.tables.every((tableId) => state.tables.includes(tableId)))
+      .forEach((metric) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "col-chip" + (state.metrics.includes(metric.id) ? " selected" : "");
+        button.textContent = metric.label;
+        button.addEventListener("click", () => {
+          const index = state.metrics.indexOf(metric.id);
+          if (index >= 0) state.metrics.splice(index, 1); else state.metrics.push(metric.id);
+          renderMetrics();
+          updateSql();
+        });
+        root.appendChild(button);
+      });
   }
   function isNumericColumn(tableId, colName) {
     const t = SQL_SCHEMA.getTable(tableId);
@@ -589,7 +626,13 @@
     return row;
   }
   function updateSql() {
-    $("#sql-out").value = SqlBuilder.buildSelect(state);
+    const result = SqlBuilder.build(state);
+    $("#sql-out").value = result.sql || result.errors.map((error) => `-- ПОМИЛКА: ${error}`).join("\n");
+    const status = $("#sql-status");
+    status.className = "sql-status" + (result.errors.length ? " error" : result.warnings.length ? " warning" : "");
+    status.innerHTML = result.errors.length
+      ? result.errors.map((error) => `<p><strong>Помилка:</strong> ${error}</p>`).join("")
+      : result.warnings.map((warning) => `<p><strong>Увага:</strong> ${warning}</p>`).join("");
     $("#sql-explain").innerHTML = buildExplain();
   }
   function buildExplain() {
@@ -623,6 +666,9 @@
       );
     } else {
       lines.push(`<li><b>У результаті:</b> усі поля</li>`);
+    }
+    if (state.metrics.length) {
+      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => SQL_SCHEMA.metrics.find((metric) => metric.id === id)?.label || id).join("; ")}</li>`);
     }
     if (state.orderBy.length) {
       lines.push(`<li><b>Сортування:</b> ${state.orderBy.length} правил(а)</li>`);
@@ -673,9 +719,10 @@
     }
     if (state.step === 4) renderFilters();
     if (state.step === 5) updateSql();
+    if (state.step === 6) renderTemplates();
   }
   function goToStep(n) {
-    if (n > 1 && !state.tables.length) {
+    if (n > 1 && n < MAX_STEP && !state.tables.length) {
       notify("Спочатку оберіть джерела", false);
       return;
     }
@@ -691,6 +738,7 @@
       fields: [],
       filters: [],
       orderBy: [],
+      metrics: [],
       mode: "select",
       targetTable: "work_result",
     });
@@ -701,6 +749,71 @@
     updateSql();
     notify("Очищено");
   }
+  function renderTemplates() {
+    const root = $("#templates-list");
+    root.innerHTML = TEMPLATE_SCRIPTS.map(
+      (tpl, idx) => `
+        <article class="preset-card">
+          <strong>${tpl.title}</strong>
+          <span>${tpl.description}</span>
+          <div class="preset-actions">
+            <button type="button" class="btn" data-load="${idx}">Вставити</button>
+            <button type="button" class="btn ghost" data-copy="${idx}">Копіювати</button>
+          </div>
+        </article>`
+    ).join("");
+    root.querySelectorAll("[data-load]").forEach((btn) => {
+      btn.addEventListener("click", () => loadTemplate(Number(btn.dataset.load)));
+    });
+    root.querySelectorAll("[data-copy]").forEach((btn) => {
+      btn.addEventListener("click", () => copyTemplate(Number(btn.dataset.copy)));
+    });
+  }
+  function loadTemplate(index) {
+    const tpl = TEMPLATE_SCRIPTS[index];
+    if (!tpl) return;
+    const sql = applyTemplateSettings(tpl.sql);
+    $("#sql-out").value = sql;
+    $("#sql-explain").innerHTML = `<p>Завантажено шаблон: <strong>${tpl.title}</strong>.</p>`;
+    notify("Шаблон завантажено");
+  }
+  async function copyTemplate(index) {
+    const tpl = TEMPLATE_SCRIPTS[index];
+    if (!tpl) return;
+    const sql = applyTemplateSettings(tpl.sql);
+    try {
+      await navigator.clipboard.writeText(sql);
+      notify("Шаблон скопійовано");
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = sql;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      document.body.removeChild(area);
+      notify("Шаблон скопійовано");
+    }
+  }
+
+  function getTemplateSettings() {
+    return {
+      year: Number($("#tpl-year").value) || 2026,
+      monthStart: Number($("#tpl-month-start").value) || 1,
+      monthEnd: Number($("#tpl-month-end").value) || 6,
+    };
+  }
+
+  function applyTemplateSettings(sql) {
+    const settings = getTemplateSettings();
+    const year = String(settings.year);
+    const monthStart = String(settings.monthStart).padStart(2, "0");
+    const monthEnd = String(settings.monthEnd).padStart(2, "0");
+    return sql
+      .replace(/\{\{YEAR\}\}/g, year)
+      .replace(/\{\{MONTH_START\}\}/g, monthStart)
+      .replace(/\{\{MONTH_END\}\}/g, monthEnd);
+  }
+
   function bind() {
     $("#btn-next").addEventListener("click", () => go(1));
     $("#btn-back").addEventListener("click", () => go(-1));
