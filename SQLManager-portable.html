@@ -1,0 +1,3132 @@
+<!DOCTYPE html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Конструктор SQL</title>
+    <style>
+:root {
+  --bg0: #0f1419;
+  --bg1: #171e26;
+  --bg2: #1f2833;
+  --bg3: #2a3542;
+  --line: #334155;
+  --text: #e8eef4;
+  --muted: #93a4b5;
+  --accent: #2a9d8f;
+  --accent-2: #e9c46a;
+  --danger: #e76f51;
+  --ok: #2a9d8f;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  --radius: 14px;
+  --font: "Segoe UI", "PT Root UI", "Inter", system-ui, sans-serif;
+  --mono: "Cascadia Code", "Consolas", "SF Mono", monospace;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font);
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(42, 157, 143, 0.18), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(233, 196, 106, 0.12), transparent 50%),
+    linear-gradient(180deg, var(--bg0), #0c1015 60%, #0a0e12);
+}
+body {
+  min-height: 100vh;
+}
+.app {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 28px 20px 48px;
+}
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.brand h1 {
+  margin: 0 0 6px;
+  font-size: clamp(1.6rem, 2.5vw, 2.1rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.brand p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 48ch;
+  line-height: 1.45;
+}
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.step-pill {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+.step-pill.active {
+  color: #042f2e;
+  background: var(--accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+.step-pill.done {
+  color: var(--accent-2);
+  border-color: rgba(233, 196, 106, 0.35);
+}
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+@media (min-width: 1100px) {
+  .layout.with-sql {
+    grid-template-columns: 1.15fr 0.85fr;
+    align-items: start;
+  }
+}
+.panel-card,
+.sql-card {
+  background: linear-gradient(180deg, rgba(31, 40, 51, 0.95), rgba(23, 30, 38, 0.98));
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 18px 16px;
+}
+.panel {
+  display: none;
+}
+.panel.active {
+  display: block;
+}
+.panel h2 {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+}
+.panel .sub {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+input[type="search"],
+input[type="text"],
+select,
+textarea {
+  width: 100%;
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  outline: none;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(42, 157, 143, 0.7);
+  box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.15);
+}
+.btn {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--accent);
+  color: #042f2e;
+  transition: 0.15s ease;
+}
+.btn:hover {
+  filter: brightness(1.06);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.btn.secondary {
+  background: var(--bg3);
+  color: var(--text);
+}
+.btn.danger {
+  background: rgba(231, 111, 81, 0.15);
+  color: #ffb4a2;
+  border: 1px solid rgba(231, 111, 81, 0.35);
+}
+.btn.icon {
+  width: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 1.2rem;
+}
+.catalog-group {
+  margin-bottom: 18px;
+}
+.catalog-group h3 {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+.table-card {
+  text-align: left;
+  border: 1px solid var(--line);
+  background: rgba(15, 20, 25, 0.65);
+  border-radius: 12px;
+  padding: 12px 13px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  transition: 0.15s ease;
+}
+.table-card:hover {
+  border-color: rgba(42, 157, 143, 0.5);
+}
+.table-card.selected {
+  border-color: var(--accent);
+  background: rgba(42, 157, 143, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(42, 157, 143, 0.35);
+}
+.t-title {
+  font-weight: 650;
+  font-size: 0.98rem;
+}
+.t-tech {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--accent-2);
+  opacity: 0.85;
+}
+.t-desc {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.selected-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 36px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(42, 157, 143, 0.15);
+  border: 1px solid rgba(42, 157, 143, 0.35);
+  border-radius: 999px;
+  padding: 6px 8px 6px 12px;
+  font-size: 0.88rem;
+}
+.chip button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+.muted {
+  color: var(--muted);
+}
+.col-chip.selected {
+  border-color: var(--accent);
+  background: rgba(42, 157, 143, 0.18);
+  color: var(--text);
+}
+.sql-status {
+  display: none;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.sql-status:not(:empty) { display: block; }
+.sql-status p { margin: 0 0 6px; }
+.sql-status p:last-child { margin-bottom: 0; }
+.sql-status.warning { color: var(--accent-2); background: rgba(233, 196, 106, 0.08); border: 1px solid rgba(233, 196, 106, 0.3); }
+.sql-status.error { color: #ffb4a2; background: rgba(231, 111, 81, 0.1); border: 1px solid rgba(231, 111, 81, 0.35); }
+.hint {
+  color: var(--muted);
+  line-height: 1.45;
+}
+.presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.preset-card {
+  text-align: left;
+  border: 1px dashed rgba(233, 196, 106, 0.35);
+  background: rgba(233, 196, 106, 0.06);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+}
+.preset-card strong {
+  color: var(--accent-2);
+}
+.preset-card span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.template-settings {
+  margin-bottom: 18px;
+}
+.template-settings-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.template-settings-row label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.template-settings-row input,
+.template-settings-row select {
+  min-width: 0;
+}
+.preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.join-row,
+.field-row,
+.filter-row {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.join-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+@media (max-width: 900px) {
+  .join-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.join-grid label,
+.mode-row label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.join-note {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--accent-2);
+}
+.field-picker {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.picker-block h4,
+.fields-detail h4 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.picker-cols,
+.quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.col-chip {
+  border: 1px solid var(--line);
+  background: var(--bg0);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.col-chip.on,
+.col-chip:hover {
+  border-color: var(--accent);
+  background: rgba(42, 157, 143, 0.15);
+}
+.field-row,
+.filter-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.filter-row {
+  grid-template-columns: 1.2fr 1.2fr 1fr 1fr auto;
+}
+@media (max-width: 800px) {
+  .field-row,
+  .filter-row {
+    grid-template-columns: 1fr;
+  }
+}
+.field-name {
+  font-size: 0.9rem;
+}
+.mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.mode-row label {
+  min-width: 220px;
+  flex: 1;
+}
+.nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+.sql-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+.sql-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+#sql-out {
+  min-height: 360px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre;
+}
+#sql-explain {
+  margin-top: 12px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+#sql-explain ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+#sql-explain b {
+  color: var(--text);
+  font-weight: 600;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(42, 157, 143, 0.12);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.footer-note {
+  margin-top: 14px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #12352f;
+  color: #b7f0e6;
+  border: 1px solid rgba(42, 157, 143, 0.5);
+  padding: 10px 16px;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.2s ease;
+  z-index: 50;
+  font-weight: 600;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.toast.error {
+  background: #3a1d17;
+  color: #ffc4b5;
+  border-color: rgba(231, 111, 81, 0.5);
+}
+.section-split {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.12);
+  margin: 18px 0;
+}
+.block {
+  margin-bottom: 18px;
+}
+.block-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+.join-plain {
+  display: grid;
+  gap: 10px;
+}
+.join-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.join-line select {
+  width: auto;
+  min-width: 160px;
+  flex: 1;
+}
+.join-word {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.join-type {
+  min-width: 220px !important;
+}
+.field-source {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: rgba(0, 0, 0, 0.12);
+}
+.field-pick-list {
+  display: grid;
+  gap: 6px;
+}
+.pick-row {
+  display: grid;
+  grid-template-columns: 22px 1fr minmax(140px, 180px);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.pick-row.on {
+  background: rgba(42, 157, 143, 0.1);
+  border-color: rgba(42, 157, 143, 0.3);
+}
+.pick-label {
+  cursor: pointer;
+}
+.pick-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.pick-agg {
+  font-size: 0.88rem;
+}
+.pick-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+.order-row {
+  grid-template-columns: 1.5fr 1fr auto;
+}
+.how-to {
+  line-height: 1.55;
+  padding: 12px 14px;
+  background: rgba(42, 157, 143, 0.08);
+  border: 1px solid rgba(42, 157, 143, 0.25);
+  border-radius: 12px;
+}
+.how-to b {
+  color: var(--accent);
+}
+.result-builder {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .result-builder {
+    grid-template-columns: 1fr;
+  }
+}
+.result-col {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 12px;
+  min-height: 200px;
+}
+.result-chosen {
+  border-color: rgba(42, 157, 143, 0.35);
+  background: rgba(42, 157, 143, 0.06);
+}
+.col-head {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.col-sub {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.avail-group {
+  margin-bottom: 14px;
+}
+.avail-title {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.avail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.avail-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg0);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.12s ease;
+}
+.avail-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(42, 157, 143, 0.15);
+}
+.avail-chip.used,
+.avail-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chip-plus {
+  color: var(--accent);
+  font-weight: 800;
+}
+.chip-tag {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+.chosen-card {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid rgba(42, 157, 143, 0.3);
+  background: rgba(15, 20, 25, 0.75);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.chosen-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(42, 157, 143, 0.2);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.chosen-name {
+  font-weight: 700;
+  font-size: 0.98rem;
+}
+.chosen-from {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 2px 0 8px;
+}
+.chosen-op {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.chosen-op span {
+  font-weight: 600;
+  color: var(--accent-2);
+}
+.chosen-tip {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.chosen-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.btn.tiny {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 0.95rem;
+}
+.sort-block {
+  margin-top: 4px;
+}
+.sort-card {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr auto;
+  gap: 10px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.sort-card label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.sort-card label span {
+  font-weight: 600;
+  color: var(--text);
+}
+.muted-box {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--line);
+}
+@media (max-width: 700px) {
+  .sort-card {
+    grid-template-columns: 1fr;
+  }
+  .chosen-card {
+    grid-template-columns: 28px 1fr;
+  }
+  .chosen-actions {
+    grid-column: 2;
+    flex-direction: row;
+  }
+}
+.explain-box {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+.explain-box ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.explain-box b {
+  color: var(--text);
+}
+.table-card .t-title {
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+.table-card .t-desc {
+  order: 2;
+}
+.table-card .t-tech {
+  order: 3;
+  opacity: 0.55;
+  font-size: 0.68rem;
+}
+.quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  align-items: center;
+}
+@media (max-width: 700px) {
+  .pick-row {
+    grid-template-columns: 22px 1fr;
+  }
+  .pick-agg {
+    grid-column: 2;
+  }
+}
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mode-tab {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mode-tab.active {
+  color: #042f2e;
+  background: var(--accent);
+  border-color: transparent;
+}
+.task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.task-card {
+  text-align: left;
+  border: 1px solid var(--line);
+  background: rgba(15, 20, 25, 0.7);
+  border-radius: 14px;
+  padding: 14px 14px 16px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  row-gap: 6px;
+  transition: 0.15s ease;
+}
+.task-card:hover {
+  border-color: rgba(42, 157, 143, 0.55);
+  background: rgba(42, 157, 143, 0.1);
+}
+.task-num {
+  grid-row: 1 / span 2;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  background: rgba(233, 196, 106, 0.15);
+  color: var(--accent-2);
+  align-self: start;
+}
+.task-card .t-title {
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+.task-card .t-desc {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.task-params {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 8px;
+}
+.param-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.param-field span {
+  font-weight: 600;
+  color: var(--text);
+}
+.result-hint {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(233, 196, 106, 0.08);
+  border: 1px solid rgba(233, 196, 106, 0.25);
+  color: var(--accent-2);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.back-link {
+  margin-bottom: 4px;
+}
+#sql-out-task {
+  min-height: 360px;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre;
+  width: 100%;
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+footer-note code,
+.footer-note code {
+  font-family: var(--mono);
+  color: var(--accent-2);
+  font-size: 0.85em;
+}
+#mode-advanced[hidden],
+#mode-tasks[hidden],
+#task-form-panel[hidden],
+#tasks-home[hidden] {
+  display: none !important;
+}
+#task-form-panel.panel {
+  display: block;
+}
+
+</style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="brand">
+          <h1>Конструктор SQL</h1>
+          <p>
+            Зібрати будь-який запит вибором: джерела → поєднання → що
+            показати → фільтри. Без написання SQL вручну.
+          </p>
+        </div>
+        <nav class="steps" id="wizard-steps" aria-label="Кроки">
+          <button type="button" class="step-pill active" data-step="1">1. Джерела</button>
+          <button type="button" class="step-pill" data-step="2">2. Поєднання</button>
+          <button type="button" class="step-pill" data-step="3">3. Результат</button>
+          <button type="button" class="step-pill" data-step="4">4. Фільтри</button>
+          <button type="button" class="step-pill" data-step="5">5. SQL</button>
+          <button type="button" class="step-pill" data-step="6">6. Шаблони</button>
+        </nav>
+      </header>
+
+      <div class="layout with-sql">
+        <main class="panel-card">
+          
+          <section class="panel active" data-step="1">
+            <h2>Звідки брати дані?</h2>
+            <p class="sub">
+              Додайте один або кілька джерел. Назви — звичайною мовою.
+              (Технічні імена таблиць БД лише дрібним текстом — для вас вони не
+              обов’язкові.)
+            </p>
+            <div class="toolbar">
+              <input
+                id="search-tables"
+                type="search"
+                placeholder="Пошук по назві або опису…"
+                style="max-width: 420px"
+              />
+              <span class="badge">Обрано: <span id="selected-count">0</span></span>
+            </div>
+            <div class="selected-strip" id="selected-strip"></div>
+            <div id="table-catalog"></div>
+            <p class="footer-note">
+              Немає потрібного джерела в списку? Його можна додати в
+              <code>data/schema.js</code> (поки немає підключення до БД —
+              каталог редагується вручну).
+            </p>
+          </section>
+
+          
+          <section class="panel" data-step="2">
+            <h2>Як працюємо з даними?</h2>
+            <p class="sub">
+              Якщо джерел кілька — вкажіть, як їх з’єднати (які поля «одне й те
+              саме»). Оберіть також, що зробити з результатом.
+            </p>
+
+            <div class="block">
+              <h3 class="block-title">Що зробити з результатом</h3>
+              <div class="mode-row">
+                <label>
+                  Дія
+                  <select id="mode-select"></select>
+                </label>
+                <label id="target-wrap">
+                  Назва нової таблиці / об’єкта
+                  <input id="target-table" type="text" value="work_result" />
+                </label>
+              </div>
+            </div>
+
+            <div class="block" id="joins-block">
+              <h3 class="block-title">З’єднання джерел</h3>
+              <p class="hint" id="joins-hint"></p>
+              <div id="bridge-info" class="hint"></div>
+              <div id="joins-list"></div>
+            </div>
+            <div class="block">
+              <h3 class="block-title">Семантичні правила</h3>
+              <label><input id="preset-current-insurer" type="checkbox" /> Актуальні реквізити та КВЕД страхувальника</label>
+              <p class="hint">Додає статуси актуальності лише за вашим вибором; історичні записи не фільтруються автоматично.</p>
+            </div>
+          </section>
+
+          
+          <section class="panel" data-step="3">
+            <h2>Що має бути в таблиці-відповіді?</h2>
+            <p class="sub how-to">
+              <b>1.</b> Зліва натисніть поле — воно з’явиться справа.<br />
+              <b>2.</b> Справа оберіть, <em>що з ним зробити</em> (просто показати /
+              порахувати суму / середнє / кількість…).<br />
+              <b>3.</b> За потреби знизу вкажіть, <em>в якому порядку</em> показувати
+              рядки.
+            </p>
+
+            <div class="block">
+              <h3 class="block-title">Готові показники</h3>
+              <p class="hint">Показники враховують зернистість і не підміняють кількість осіб кількістю рядків.</p>
+              <div id="metrics-list" class="quick-filters"></div>
+            </div>
+
+            <div class="result-builder" id="result-builder">
+              <div class="result-col result-available">
+                <h3 class="col-head">Доступні поля</h3>
+                <p class="col-sub">Натисніть, щоб додати у відповідь →</p>
+                <div id="fields-available"></div>
+              </div>
+              <div class="result-col result-chosen">
+                <h3 class="col-head">
+                  Колонки у відповіді
+                  <span class="badge" id="chosen-count">0</span>
+                </h3>
+                <p class="col-sub">Так виглядатимуть колонки в результаті</p>
+                <div id="fields-chosen"></div>
+                <p class="hint" id="fields-empty-hint">
+                  Поки порожньо — буде показано <b>усі</b> поля (SELECT *).
+                  Краще додати лише потрібні.
+                </p>
+              </div>
+            </div>
+
+            <div class="section-split"></div>
+
+            <div class="sort-block">
+              <h3 class="block-title">Порядок рядків (необов’язково)</h3>
+              <p class="hint">
+                Якщо не додавати — порядок буде як у базі. Якщо додати —
+                наприклад «від більшого значення до меншого».
+              </p>
+              <div id="order-list"></div>
+              <button type="button" class="btn ghost" id="btn-add-order">
+                + Додати сортування
+              </button>
+            </div>
+          </section>
+
+          
+          <section class="panel" data-step="4">
+            <h2>Які рядки залишити?</h2>
+            <p class="sub">
+              Обмеження вибірки: конкретний код, період, «поле містить…», «не
+              порожнє» тощо. Без умов — потраплять усі рядки, що підходять за
+              з’єднаннями.
+            </p>
+            <label class="check-line">
+              <input id="filter-latest-person" type="checkbox" />
+              Лише остання картка особи за датою зміни
+            </label>
+            <label class="check-line">
+              <input id="use-parallel-8" type="checkbox" />
+              Використовувати Oracle hint PARALLEL(8)
+            </label>
+            <div id="filters-list"></div>
+            <div class="quick-filters" id="quick-filters"></div>
+          </section>
+
+          
+          <section class="panel" data-step="5">
+            <h2>Перегляд і копіювання</h2>
+            <p class="sub">Що саме зібрано (людською мовою):</p>
+            <div id="sql-explain" class="explain-box"></div>
+            <p class="footer-note">
+              Скопіюйте SQL справа і виконайте на сервері (PL/SQL Developer /
+              SQL*Plus). Ця програма базу не підключає — лише будує текст запиту.
+            </p>
+          </section>
+
+          <section class="panel" data-step="6">
+            <h2>Шаблони SQL</h2>
+            <p class="sub">
+              Тут зберігаються стандартизовані скрипти для створення таблиць,
+              вибірки даних та інших повторюваних задач.
+            </p>
+            <div class="template-settings" id="template-settings">
+              <div class="template-settings-row">
+                <label>
+                  Рік від
+                  <input id="tpl-year-start" type="number" min="2000" max="2100" value="2022" />
+                </label>
+                <label>
+                  Рік до
+                  <input id="tpl-year-end" type="number" min="2000" max="2100" value="2026" />
+                </label>
+                <label>
+                  Місяць від
+                  <input id="tpl-month-start" type="number" min="1" max="12" value="1" />
+                </label>
+                <label>
+                  Місяць до
+                  <input id="tpl-month-end" type="number" min="1" max="12" value="6" />
+                </label>
+                <label>
+                  OTK (1/0, лише T6)
+                  <select id="tpl-otk">
+                    <option value="any">Будь-яке</option>
+                    <option value="1">Так (1)</option>
+                    <option value="0">Ні (0)</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div id="templates-list" class="presets"></div>
+          </section>
+
+          <div class="nav">
+            <button type="button" class="btn secondary" id="btn-back" disabled>
+              Назад
+            </button>
+            <button type="button" class="btn" id="btn-next">Далі</button>
+          </div>
+        </main>
+
+        <aside class="sql-card">
+          <h2>SQL</h2>
+          <p class="muted" style="margin: 0; font-size: 0.9rem">
+            Оновлюється під час вибору на будь-якому кроці.
+          </p>
+          <div id="sql-status" class="sql-status" role="alert" aria-live="polite"></div>
+          <div class="sql-actions">
+            <button type="button" class="btn" id="btn-copy">Копіювати</button>
+            <button type="button" class="btn ghost" id="btn-download">
+              Зберегти .sql
+            </button>
+            <button type="button" class="btn secondary" id="btn-reset">
+              Почати спочатку
+            </button>
+          </div>
+          <textarea id="sql-out" readonly spellcheck="false"></textarea>
+        </aside>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script>
+window.SQL_SCHEMA = {
+  schemas: {
+    work: "Робочі / підготовлені набори",
+    ikis_person: "Особи",
+    ikis_websm: "Звітність і нарахування",
+    ikis_ersp: "Страхувальники / організації",
+    ikis_sys: "Довідники",
+    ikis_ndi: "Нормативно-довідкова інформація",
+  },
+  tables: [
+    {
+      id: "t6_2026_edrpou",
+      fullName: "vasiliuk_u.t6_2026_edrpou",
+      label: "Зведення нарахувань (T6 2026)",
+      defaultAlias: "t6",
+      description:
+        "Підготовлені рядки: організація, особа, суми, місяць/рік, категорія. База для різних вибірок по зведенню.",
+      group: "work",
+      grain: "один рядок на особу, страхувальника та місяць у підготовленому зведенні",
+      columns: [
+        { name: "reg", label: "Регіон", type: "VARCHAR2" },
+        { name: "slb_im", label: "Внутрішній код страхувальника", type: "NUMBER" },
+        { name: "edrpou", label: "Код організації (ЄДРПОУ)", type: "VARCHAR2" },
+        { name: "ian_name1", label: "Назва організації", type: "VARCHAR2" },
+        { name: "kod_zo", label: "Ідентифікатор особи (РНОКПП)", type: "VARCHAR2" },
+        { name: "birth_dt", label: "Дата народження", type: "DATE" },
+        { name: "sum_narah", label: "Сума нарахувань", type: "NUMBER" },
+        { name: "sum_vrah", label: "Сума утримань", type: "NUMBER" },
+        { name: "sum_narah_vnes", label: "Сума внесків", type: "NUMBER" },
+        { name: "aped46_mnth", label: "Місяць", type: "NUMBER" },
+        { name: "year", label: "Рік", type: "NUMBER" },
+        { name: "kat_zo", label: "Категорія особи", type: "NUMBER" },
+        { name: "sex", label: "Стать (код)", type: "NUMBER" },
+      ],
+    },
+    {
+      id: "insured_person_info",
+      fullName: "ikis_person.insured_person_info",
+      label: "Картка особи (ПІБ, документи)",
+      defaultAlias: "ipi",
+      description:
+        "ПІБ, дата народження, стать, паспорт, ІПН — для будь-яких списків і розшифровок людей.",
+      group: "ikis_person",
+      grain: "версія картки особи; для аналітики береться остання за modify_dt",
+      columns: [
+        { name: "ip_id", label: "Внутрішній ID особи", type: "NUMBER" },
+        { name: "ln_name", label: "Прізвище", type: "VARCHAR2" },
+        { name: "fn_name", label: "Ім'я", type: "VARCHAR2" },
+        { name: "sn_name", label: "По батькові", type: "VARCHAR2" },
+        { name: "nt_name", label: "Громадянство", type: "VARCHAR2" },
+        { name: "sex_name", label: "Стать (текст)", type: "VARCHAR2" },
+        { name: "birth_dt", label: "Дата народження", type: "DATE" },
+        { name: "pass_serial", label: "Серія документа", type: "VARCHAR2" },
+        { name: "pass_number", label: "Номер документа", type: "VARCHAR2" },
+        { name: "pass_dt", label: "PASS_DT (уточнити семантику)", type: "UNKNOWN" },
+        { name: "pt_name", label: "PT_NAME (уточнити семантику)", type: "UNKNOWN" },
+        { name: "numident", label: "ІПН / РНОКПП", type: "VARCHAR2" },
+        { name: "modify_dt", label: "Коли змінювали запис", type: "DATE" },
+        { name: "ip_unique", label: "КСС", type: "VARCHAR2" },
+      ],
+    },
+    {
+      id: "insured_person",
+      fullName: "ikis_person.insured_person",
+      label: "Особа (головний запис)",
+      defaultAlias: "ip",
+      description: "Ключ особи; зв’язок із карткою реквізитів.",
+      group: "ikis_person",
+      columns: [
+        { name: "ip_id", label: "Внутрішній ID особи", type: "NUMBER" },
+      ],
+    },
+    {
+      id: "sm_packlabel",
+      fullName: "ikis_websm.sm_packlabel",
+      label: "Пакети звітності",
+      defaultAlias: "plb",
+      description: "Заголовки поданих пакетів: організація, період, статус.",
+      group: "ikis_websm",
+      grain: "один пакет звітності",
+      columns: [
+        { name: "slb_id", label: "Номер пакета", type: "NUMBER" },
+        { name: "slb_im", label: "Код страхувальника в пакеті", type: "NUMBER" },
+        { name: "slb_org", label: "Організація в пакеті", type: "NUMBER" },
+        { name: "slb_org_mdzu", label: "Орган обліку", type: "NUMBER" },
+        { name: "slb_fixed", label: "Зафіксовано", type: "VARCHAR2" },
+        { name: "slb_actuality", label: "Актуальна версія", type: "VARCHAR2" },
+        { name: "slb_st", label: "Статус пакета", type: "VARCHAR2" },
+        { name: "slb_system", label: "Система", type: "NUMBER" },
+        { name: "slb_type", label: "Тип пакета", type: "NUMBER" },
+        { name: "slb_charg_year", label: "Рік (пакет)", type: "NUMBER" },
+        { name: "slb_charg_mnth", label: "Місяць (пакет)", type: "NUMBER" },
+        { name: "slb_boss_numident", label: "ІПН керівника", type: "VARCHAR2" },
+        { name: "slb_boss_pib", label: "ПІБ керівника", type: "VARCHAR2" },
+      ],
+    },
+    {
+      id: "sm_ape4_6data",
+      fullName: "ikis_websm.sm_ape4_6data",
+      label: "Детальні рядки форми Т6",
+      defaultAlias: "pd",
+      description:
+        "Сирі рядки звіту по особах у пакеті: ідентифікатор, суми, період, ознаки.",
+      group: "ikis_websm",
+      grain: "один сирий рядок APE 4-6 у пакеті",
+      columns: [
+        { name: "aped46_slb", label: "Номер пакета", type: "NUMBER" },
+        { name: "aped46_page", label: "Аркуш", type: "NUMBER" },
+        { name: "aped46_st", label: "Статус рядка", type: "VARCHAR2" },
+        { name: "aped46_numident", label: "РНОКПП особи", type: "VARCHAR2" },
+        { name: "aped46_ln", label: "Прізвище (у рядку)", type: "VARCHAR2" },
+        { name: "aped46_nm", label: "Ім'я (у рядку)", type: "VARCHAR2" },
+        { name: "aped46_ftn", label: "По батькові (у рядку)", type: "VARCHAR2" },
+        { name: "aped46_pay_tp", label: "Тип операції / нарахування", type: "NUMBER" },
+        { name: "aped46_sum", label: "Сума (основна)", type: "NUMBER" },
+        { name: "aped46_sum_pv", label: "Сума (утримання)", type: "NUMBER" },
+        { name: "aped46_sum_narah", label: "Сума (внески)", type: "NUMBER" },
+        { name: "aped46_sum_diff", label: "Сума (різниця)", type: "NUMBER" },
+        { name: "aped46_sum_v", label: "Сума (додатково)", type: "NUMBER" },
+        { name: "aped46_mnth", label: "Місяць", type: "NUMBER", semanticExpression: "NVL({sm_ape4_6data}.aped46_mnth, {sm_packlabel}.slb_charg_mnth)", requires: ["sm_packlabel"] },
+        { name: "aped46_year", label: "Рік", type: "NUMBER", semanticExpression: "NVL({sm_ape4_6data}.aped46_year, {sm_packlabel}.slb_charg_year)", requires: ["sm_packlabel"] },
+        { name: "aped46_zo", label: "Категорія", type: "NUMBER" },
+        { name: "aped46_sex", label: "Стать (код)", type: "NUMBER" },
+        { name: "aped46_otk", label: "Ознака трудової книжки (OTK: 1 — так, 0 — ні)", type: "NUMBER" },
+        { name: "aped46_dd_nwork", label: "К-ть днів (невідпрацьовані)", type: "NUMBER" },
+        { name: "aped46_dd_nsal", label: "К-ть днів (без зарплати)", type: "NUMBER" },
+        { name: "aped46_dd_wrkr", label: "К-ть днів (робота)", type: "NUMBER" },
+        { name: "aped46_kd_vp", label: "Код виду платежу", type: "NUMBER" },
+        { name: "aped46_nrc", label: "Додаткова ознака", type: "NUMBER" },
+      ],
+    },
+    {
+      id: "sm_ape4_5data",
+      fullName: "ikis_websm.sm_ape4_5data",
+      label: "Трудові відносини та посади (APE 4-5)",
+      defaultAlias: "d5",
+      description: "Прийняття, звільнення, переведення, професія та посада людини у страхувальника.",
+      group: "ikis_websm",
+      grain: "період особи в пакеті; перед JOIN агрегується до пакет + РНОКПП",
+      columns: [
+        { name: "aped45_slb", label: "Номер пакета", type: "NUMBER" },
+        { name: "aped45_page", label: "Аркуш", type: "NUMBER" },
+        { name: "aped45_st", label: "Статус рядка", type: "VARCHAR2" },
+        { name: "aped45_numident", label: "РНОКПП особи", type: "VARCHAR2" },
+        { name: "aped45_start_dt", label: "День початку трудових відносин", type: "NUMBER" },
+        { name: "aped45_stop_dt", label: "День кінця трудових відносин", type: "NUMBER" },
+        { name: "aped45_person_type", label: "Тип особи", type: "NUMBER" },
+        { name: "aped45_base_end_work", label: "Підстава припинення трудових відносин", type: "VARCHAR2" },
+        { name: "aped45_newjob_dt", label: "Дата створення нового робочого місця", type: "DATE" },
+        { name: "aped45_dog_cph", label: "Ознака договору ЦПХ", type: "VARCHAR2" },
+        { name: "aped45_date_hire", label: "Дата прийняття на роботу", type: "DATE" },
+        { name: "aped45_date_fire", label: "Дата звільнення", type: "DATE" },
+        { name: "aped45_pel", label: "Посилання на зв’язок особи з ЄСВ", type: "NUMBER" },
+        { name: "aped45_profession_name", label: "Професійна назва роботи", type: "VARCHAR2" },
+        { name: "aped45_zkpptr", label: "Код ЗКППТР", type: "NUMBER" },
+        { name: "aped45_code_class_prof", label: "Код класифікатора професій", type: "VARCHAR2" },
+        { name: "aped45_position", label: "Посада", type: "VARCHAR2" },
+        { name: "aped45_doc_reason", label: "Документ-підстава", type: "VARCHAR2" },
+        { name: "aped45_mil_rank", label: "Військове звання", type: "VARCHAR2" },
+        { name: "aped45_sumisnic", label: "Внутрішній сумісник (1/0)", type: "NUMBER" },
+        { name: "aped45_move_pos", label: "Переведення або зміна посади (1/0)", type: "NUMBER" },
+      ],
+    },
+    {
+      id: "pinsur_main",
+      fullName: "ikis_ersp.pinsur_main",
+      label: "Страхувальник (головний запис)",
+      defaultAlias: "im",
+      description: "Зв’язок пакетів і реквізитів організації.",
+      group: "ikis_ersp",
+      columns: [
+        { name: "im_id", label: "Код страхувальника", type: "NUMBER" },
+        { name: "im_ih", label: "Посилання на документ змін", type: "NUMBER" },
+        { name: "im_st", label: "Статус страхувальника", type: "VARCHAR2" },
+      ],
+    },
+    {
+      id: "pinsur_chng_doc",
+      fullName: "ikis_ersp.pinsur_chng_doc",
+      label: "Документ змін організації",
+      defaultAlias: "ih",
+      description: "Проміжна ланка до анкети / реквізитів.",
+      group: "ikis_ersp",
+      columns: [
+        { name: "ih_id", label: "ID документа", type: "NUMBER" },
+        { name: "ih_im", label: "Посилання на страхувальника", type: "NUMBER" },
+        { name: "ih_ian", label: "Посилання на анкету", type: "NUMBER" },
+        { name: "ih_iab", label: "Посилання на анкету Б", type: "NUMBER" },
+        { name: "ih_iac", label: "Посилання на анкету В", type: "NUMBER" },
+        { name: "ih_ivh", label: "Ключ версії реквізитів", type: "NUMBER" },
+        { name: "ih_st", label: "Статус документа", type: "VARCHAR2" },
+        { name: "ih_st_actual", label: "Ознака актуальності", type: "VARCHAR2" },
+      ],
+    },
+    {
+      id: "pinsur_ankt_a",
+      fullName: "ikis_ersp.pinsur_ankt_a",
+      label: "Реквізити організації (анкета)",
+      defaultAlias: "ian",
+      description: "ЄДРПОУ, назва та інші ідентифікатори юрособи.",
+      group: "ikis_ersp",
+      columns: [
+        { name: "ian_id", label: "ID анкети", type: "NUMBER" },
+        { name: "ian_im", label: "Страхувальник", type: "NUMBER" },
+        { name: "ian_numident", label: "Код (ЄДРПОУ)", type: "VARCHAR2" },
+        { name: "ian_name1", label: "Назва", type: "VARCHAR2" },
+        { name: "ian_incode", label: "Код підрозділу / філії", type: "VARCHAR2" },
+        { name: "ian_ic", label: "Категорія страхувальника", type: "NUMBER" },
+      ],
+    },
+    { id: "sm_ape4_5", fullName: "ikis_websm.sm_ape4_5", label: "Заголовок APE 4-5", defaultAlias: "a45", group: "ikis_websm", grain: "один аркуш APE 4-5", columns: [{ name: "ape45_slb", label: "Пакет", type: "NUMBER" }, { name: "ape45_page", label: "Аркуш", type: "NUMBER" }, { name: "ape45_st", label: "Стан", type: "VARCHAR2" }] },
+    { id: "sm_ape4_6", fullName: "ikis_websm.sm_ape4_6", label: "Заголовок APE 4-6", defaultAlias: "a46", group: "ikis_websm", grain: "один аркуш APE 4-6", columns: [{ name: "ape46_slb", label: "Пакет", type: "NUMBER" }, { name: "ape46_page", label: "Аркуш", type: "NUMBER" }, { name: "ape46_st", label: "Стан", type: "VARCHAR2" }, { name: "ape46_sum", label: "Сума", type: "NUMBER" }] },
+    { id: "pinsur_ankt_b", fullName: "ikis_ersp.pinsur_ankt_b", label: "Додаткові реквізити страхувальника", defaultAlias: "iab", group: "ikis_ersp", columns: [{ name: "iab_id", label: "ID анкети Б", type: "NUMBER" }, { name: "iab_im", label: "Страхувальник", type: "NUMBER" }] },
+    { id: "pinsur_ankt_c", fullName: "ikis_ersp.pinsur_ankt_c", label: "Територіальні реквізити страхувальника", defaultAlias: "iac", group: "ikis_ersp", columns: [{ name: "iac_id", label: "ID анкети В", type: "NUMBER" }, { name: "iac_im", label: "Страхувальник", type: "NUMBER" }, { name: "iac_ru", label: "Регіон України", type: "NUMBER" }] },
+    { id: "pinsur_kved_hst", fullName: "ikis_ersp.pinsur_kved_hst", label: "Версії КВЕД страхувальника", defaultAlias: "ivh", group: "ikis_ersp", grain: "одна версія набору КВЕД", columns: [{ name: "ivh_id", label: "ID версії", type: "NUMBER" }, { name: "ivh_im", label: "Страхувальник", type: "NUMBER" }] },
+    { id: "pinsur_kved", fullName: "ikis_ersp.pinsur_kved", label: "КВЕД страхувальника", defaultAlias: "kv", group: "ikis_ersp", grain: "запис КВЕД для версії", columns: [{ name: "iv_id", label: "ID запису", type: "NUMBER" }, { name: "iv_ivh", label: "Ключ версії", type: "NUMBER" }, { name: "iv_kvd", label: "Посилання на КВЕД", type: "NUMBER" }, { name: "iv_tp", label: "Тип / ознака КВЕД", type: "VARCHAR2" }] },
+    { id: "nsi_kved", fullName: "ikis_ndi.nsi_kved", label: "Довідник КВЕД", defaultAlias: "k", group: "ikis_ndi", grain: "один код КВЕД", columns: [{ name: "kvd_id", label: "ID КВЕД", type: "NUMBER" }, { name: "kvd_type", label: "Тип КВЕД", type: "VARCHAR2" }, { name: "kvd_section", label: "Секція", type: "CHAR" }, { name: "kvd_partition", label: "Розділ", type: "CHAR" }, { name: "kvd_group", label: "Група", type: "CHAR" }, { name: "kvd_class", label: "Клас", type: "CHAR" }, { name: "kvd_subclass", label: "Підклас", type: "CHAR" }, { name: "kvd_name", label: "Назва КВЕД", type: "VARCHAR2" }] },
+    { id: "nsi_insurercat", fullName: "ikis_ndi.nsi_insurercat", label: "Категорії страхувальників", defaultAlias: "nic", group: "ikis_ndi", columns: [{ name: "ic_id", label: "ID категорії", type: "NUMBER" }, { name: "ic_name", label: "Назва", type: "VARCHAR2" }, { name: "ic_st", label: "Статус", type: "CHAR" }] },
+    { id: "nsi_region_ukr", fullName: "ikis_ndi.nsi_region_ukr", label: "Регіони України", defaultAlias: "ru", group: "ikis_ndi", columns: [{ name: "ru_id", label: "ID регіону", type: "NUMBER" }, { name: "ru_code", label: "Код", type: "VARCHAR2" }, { name: "ru_name", label: "Назва", type: "VARCHAR2" }, { name: "ru_st", label: "Статус", type: "CHAR" }] },
+    { id: "t6_donetsk_2022", fullName: "k_nata.t6_donetsk_2022", label: "T6 Донецька область 2022", defaultAlias: "m", group: "work", columns: [{ name: "spl_im", label: "Внутрішній код страхувальника", type: "NUMBER" }] },
+    {
+      id: "mrdorg",
+      fullName: "ikis_sys.mrdorg",
+      label: "Довідник органів / регіонів",
+      defaultAlias: "mrd",
+      description: "Коди органів обліку та регіонів.",
+      group: "ikis_sys",
+      columns: [
+        { name: "mrd_id", label: "ID органу", type: "NUMBER" },
+        { name: "mrd_code", label: "Код органу", type: "NUMBER" },
+        { name: "mrd_reg_code", label: "Код регіону", type: "NUMBER" },
+      ],
+    },
+  ],
+  joins: [
+    {
+      id: "t6_to_person_info",
+      left: "t6_2026_edrpou",
+      right: "insured_person_info",
+      conditions: [{ leftCol: "kod_zo", rightCol: "numident" }],
+      type: "LEFT",
+      cardinality: "N:1",
+      isDefault: true,
+      weight: 2,
+      preferredRoot: "t6_2026_edrpou",
+      variants: [
+        {
+          id: "all_numident",
+          label: "Усі картки за РНОКПП",
+          conditions: [{ leftCol: "kod_zo", rightCol: "numident" }],
+        },
+        {
+          id: "latest_numident",
+          label: "Лише остання картка за РНОКПП",
+          conditions: [{ leftCol: "kod_zo", rightCol: "numident" }],
+          rightSource: "latest_person_info",
+          isLatest: true,
+        },
+        {
+          id: "numident_or_passport",
+          label: "За РНОКПП або паспортним ключем",
+          conditions: [{ leftCol: "kod_zo", rightCol: "sqlm_match_key" }],
+          rightSource: "latest_person_identity",
+        },
+      ],
+      note: "Особа в зведенні ↔ картка особи (за ІПН)",
+    },
+    {
+      id: "person_to_person_info",
+      left: "insured_person",
+      right: "insured_person_info",
+      conditions: [{ leftCol: "ip_id", rightCol: "ip_id" }],
+      type: "INNER",
+      cardinality: "1:N",
+      note: "Головний запис ↔ картка",
+    },
+    {
+      id: "pack_to_ape46",
+      left: "sm_packlabel",
+      right: "sm_ape4_6data",
+      conditions: [{ leftCol: "slb_id", rightCol: "aped46_slb" }],
+      type: "INNER",
+      cardinality: "1:N",
+      isDefault: true,
+      weight: 1,
+      isPhysicalForeignKey: true,
+      constraintName: "SMAPED46P_FK_SLB$REORG0",
+      note: "Пакет ↔ рядки Т6",
+    },
+    {
+      id: "pack_to_ape45",
+      left: "sm_packlabel",
+      right: "sm_ape4_5data",
+      conditions: [{ leftCol: "slb_id", rightCol: "aped45_slb" }],
+      type: "INNER",
+      cardinality: "1:N",
+      isDefault: true,
+      weight: 1,
+      isPhysicalForeignKey: true,
+      constraintName: "PFK_APE4_5DATA_SLB_P",
+      note: "Пакет ↔ періоди",
+    },
+    {
+      id: "ape46_to_ape45",
+      left: "sm_ape4_6data",
+      right: "sm_ape4_5data",
+      conditions: [
+        { leftCol: "aped46_slb", rightCol: "aped45_slb" },
+        { leftCol: "aped46_numident", rightCol: "aped45_numident" },
+      ],
+      type: "LEFT",
+      cardinality: "N:1",
+      isDefault: true,
+      weight: 1,
+      preferredRoot: "sm_ape4_6data",
+      rightSource: "ape45_by_person",
+      note: "Рядок Т6 ↔ агреговані періоди особи за ключем пакет + РНОКПП",
+    },
+    {
+      id: "person_info_to_employment_ape45",
+      left: "insured_person_info",
+      right: "sm_ape4_5data",
+      conditions: [{ leftCol: "numident", rightCol: "aped45_numident" }],
+      type: "INNER",
+      cardinality: "1:N",
+      isDefault: true,
+      weight: 0.5,
+      preferredRoot: "insured_person_info",
+      variants: [
+        {
+          id: "all_person_cards",
+          label: "Усі картки особи",
+          conditions: [{ leftCol: "numident", rightCol: "aped45_numident" }],
+        },
+        {
+          id: "latest_person_card",
+          label: "Лише остання картка особи",
+          conditions: [{ leftCol: "numident", rightCol: "aped45_numident" }],
+          leftSource: "latest_person_info",
+          isLatest: true,
+        },
+      ],
+      isPhysicalForeignKey: false,
+      semanticRole: "person_employment_by_numident",
+      warning: "Одна людина може мати декілька кадрових подій, посад і роботодавців у різних пакетах.",
+      note: "Картка особи ↔ кадрові події APE 4-5 за РНОКПП; підприємство визначається через пакет",
+    },
+    {
+      id: "t6_work_to_employment_ape45",
+      left: "t6_2026_edrpou",
+      right: "sm_ape4_5data",
+      conditions: [
+        { leftCol: "slb_im", rightCol: "sqlm_slb_im" },
+        { leftCol: "kod_zo", rightCol: "aped45_numident" },
+      ],
+      variants: [
+        {
+          id: "all_positions_at_insurer",
+          label: "Усі посади людини у страхувальника",
+          conditions: [
+            { leftCol: "slb_im", rightCol: "sqlm_slb_im" },
+            { leftCol: "kod_zo", rightCol: "aped45_numident" },
+          ],
+          rightSource: "ape45_employment_with_period",
+        },
+        {
+          id: "positions_in_same_month",
+          label: "Посади лише за той самий рік і місяць",
+          conditions: [
+            { leftCol: "slb_im", rightCol: "sqlm_slb_im" },
+            { leftCol: "kod_zo", rightCol: "aped45_numident" },
+            { leftCol: "year", rightCol: "sqlm_year" },
+            { leftCol: "aped46_mnth", rightCol: "sqlm_month" },
+          ],
+          rightSource: "ape45_employment_with_period",
+        },
+        {
+          id: "latest_position_at_insurer",
+          label: "Остання відома посада у страхувальника",
+          conditions: [
+            { leftCol: "slb_im", rightCol: "sqlm_slb_im" },
+            { leftCol: "kod_zo", rightCol: "aped45_numident" },
+          ],
+          rightSource: "ape45_latest_position_by_insurer",
+        },
+        {
+          id: "position_as_of_t6_month",
+          label: "Остання посада станом на місяць T6",
+          conditions: [
+            { leftCol: "slb_im", rightCol: "sqlm_slb_im" },
+            { leftCol: "kod_zo", rightCol: "aped45_numident" },
+            { leftCol: "year", rightCol: "sqlm_t6_year" },
+            { leftCol: "aped46_mnth", rightCol: "sqlm_t6_month" },
+            { leftCol: "kat_zo", rightCol: "sqlm_t6_kat_zo" },
+          ],
+          rightSource: "ape45_position_as_of_t6_month",
+        },
+      ],
+      type: "LEFT",
+      cardinality: "N:M",
+      isDefault: true,
+      weight: 0.25,
+      preferredRoot: "t6_2026_edrpou",
+      rightSource: "ape45_employment_with_period",
+      isPhysicalForeignKey: false,
+      semanticRole: "t6_person_employment_period",
+      endpointsOnly: true,
+      warning: "В одному місяці людина може мати декілька кадрових подій або посад. Рядки та суми T6 можуть розмножитися.",
+      note: "Робоча T6 ↔ APE 4-5 за страхувальником і РНОКПП; рік і місяць можна додати окремим варіантом зіставлення",
+    },
+    {
+      id: "pack_to_region",
+      left: "sm_packlabel",
+      right: "mrdorg",
+      conditions: [{ leftCol: "slb_org_mdzu", rightCol: "mrd_code" }],
+      type: "INNER",
+      cardinality: "N:1",
+      note: "Пакет ↔ орган / регіон",
+    },
+    {
+      id: "pack_to_insurer",
+      left: "sm_packlabel",
+      right: "pinsur_main",
+      conditions: [{ leftCol: "slb_im", rightCol: "im_id" }],
+      type: "INNER",
+      cardinality: "N:1",
+      preferredRoot: "sm_packlabel",
+      isDefault: true,
+      weight: 1,
+      note: "Пакет ↔ страхувальник",
+    },
+    {
+      id: "insurer_current_document_pointer",
+      left: "pinsur_main",
+      right: "pinsur_chng_doc",
+      conditions: [{ leftCol: "im_ih", rightCol: "ih_id" }],
+      type: "INNER",
+      cardinality: "1:1",
+      isDefault: false,
+      weight: 20,
+      note: "Вказівник на конкретний документ; не default до перевірки",
+    },
+    {
+      id: "change_document_to_ankt_a",
+      left: "pinsur_chng_doc",
+      right: "pinsur_ankt_a",
+      conditions: [{ leftCol: "ih_ian", rightCol: "ian_id" }],
+      type: "INNER",
+      cardinality: "N:1",
+      note: "Документ ↔ анкета",
+    },
+    { id: "t6_2026_to_insurer", left: "t6_2026_edrpou", right: "pinsur_main", conditions: [{ leftCol: "slb_im", rightCol: "im_id" }], type: "INNER", cardinality: "N:1", preferredRoot: "t6_2026_edrpou", isDefault: true, weight: 1, note: "T6 → страхувальник за внутрішнім кодом" },
+    { id: "t6_donetsk_to_insurer", left: "t6_donetsk_2022", right: "pinsur_main", conditions: [{ leftCol: "spl_im", rightCol: "im_id" }], type: "INNER", cardinality: "N:1", preferredRoot: "t6_donetsk_2022", isDefault: true, weight: 1 },
+    { id: "insurer_to_change_documents", left: "pinsur_main", right: "pinsur_chng_doc", conditions: [{ leftCol: "im_id", rightCol: "ih_im" }], type: "INNER", cardinality: "1:N", preferredRoot: "pinsur_main", isDefault: true, weight: 1, note: "Страхувальник → історія документів змін" },
+    { id: "change_document_to_ankt_b", left: "pinsur_chng_doc", right: "pinsur_ankt_b", conditions: [{ leftCol: "ih_iab", rightCol: "iab_id" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1 },
+    { id: "change_document_to_ankt_c", left: "pinsur_chng_doc", right: "pinsur_ankt_c", conditions: [{ leftCol: "ih_iac", rightCol: "iac_id" }], type: "LEFT", cardinality: "N:0..1", isDefault: true, weight: 1, note: "Стара умова (+) переписана як ANSI LEFT JOIN" },
+    { id: "ankt_a_to_insurer_category", left: "pinsur_ankt_a", right: "nsi_insurercat", conditions: [{ leftCol: "ian_ic", rightCol: "ic_id" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1 },
+    { id: "change_document_to_kved_history", left: "pinsur_chng_doc", right: "pinsur_kved_hst", conditions: [{ leftCol: "ih_ivh", rightCol: "ivh_id" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1, isPhysicalForeignKey: true, constraintName: "FK_PIH_IVH", semanticRole: "document_kved_version" },
+    { id: "kved_history_to_kved", left: "pinsur_kved_hst", right: "pinsur_kved", conditions: [{ leftCol: "ivh_id", rightCol: "iv_ivh" }], type: "INNER", cardinality: "1:N", isDefault: true, weight: 1, isPhysicalForeignKey: true, constraintName: "FK_IV_IVH" },
+    { id: "insurer_to_all_kved_versions", left: "pinsur_main", right: "pinsur_kved_hst", conditions: [{ leftCol: "im_id", rightCol: "ivh_im" }], type: "INNER", cardinality: "1:N", isDefault: false, weight: 20, isPhysicalForeignKey: true, constraintName: "FK_IV_IM", semanticRole: "all_insurer_kved_versions" },
+    { id: "insurer_kved_to_kved_dictionary", left: "pinsur_kved", right: "nsi_kved", conditions: [{ leftCol: "iv_kvd", rightCol: "kvd_id" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1 },
+    { id: "ankt_c_to_region", left: "pinsur_ankt_c", right: "nsi_region_ukr", conditions: [{ leftCol: "iac_ru", rightCol: "ru_id" }], type: "LEFT", cardinality: "N:0..1", isDefault: true, weight: 1, isPhysicalForeignKey: true, constraintName: "FK_IAC_RU" },
+    { id: "ankt_a_direct_insurer", left: "pinsur_ankt_a", right: "pinsur_main", conditions: [{ leftCol: "ian_im", rightCol: "im_id" }], type: "INNER", cardinality: "N:1", isDefault: false, weight: 20, isPhysicalForeignKey: true, constraintName: "FK_IAN_IM", warning: "Обходить конкретний документ змін" },
+    { id: "ankt_b_direct_insurer", left: "pinsur_ankt_b", right: "pinsur_main", conditions: [{ leftCol: "iab_im", rightCol: "im_id" }], type: "INNER", cardinality: "N:1", isDefault: false, weight: 20, isPhysicalForeignKey: true, constraintName: "FK_IAB_IM" },
+    { id: "ankt_c_direct_insurer", left: "pinsur_ankt_c", right: "pinsur_main", conditions: [{ leftCol: "iac_im", rightCol: "im_id" }], type: "LEFT", cardinality: "N:0..1", isDefault: false, weight: 20, isPhysicalForeignKey: true, constraintName: "FK_IAC_IM" },
+    { id: "ape45_data_to_header", left: "sm_ape4_5data", right: "sm_ape4_5", conditions: [{ leftCol: "aped45_slb", rightCol: "ape45_slb" }, { leftCol: "aped45_page", rightCol: "ape45_page" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1, isPhysicalForeignKey: true, constraintName: "FK_APE4_5DATA" },
+    { id: "ape46_data_to_header", left: "sm_ape4_6data", right: "sm_ape4_6", conditions: [{ leftCol: "aped46_slb", rightCol: "ape46_slb" }, { leftCol: "aped46_page", rightCol: "ape46_page" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1, isPhysicalForeignKey: true, constraintName: "SMAPED46P_FK_REORG0" },
+    { id: "ape45_header_to_pack", left: "sm_ape4_5", right: "sm_packlabel", conditions: [{ leftCol: "ape45_slb", rightCol: "slb_id" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1, isPhysicalForeignKey: true, constraintName: "PFK_APE4_5_SLB_P" },
+    { id: "ape46_header_to_pack", left: "sm_ape4_6", right: "sm_packlabel", conditions: [{ leftCol: "ape46_slb", rightCol: "slb_id" }], type: "INNER", cardinality: "N:1", isDefault: true, weight: 1, isPhysicalForeignKey: true, constraintName: "PFK_APE4_6_SLB_P" },
+  ],
+  joinTypes: [
+    { id: "INNER", label: "лише рядки, що збігаються в усіх джерелах" },
+    { id: "LEFT", label: "усі з першого + збіги з другого" },
+    { id: "RIGHT", label: "усі з другого + збіги з першого" },
+    { id: "FULL", label: "усі рядки з обох (де можливо)" },
+  ],
+  operators: [
+    { id: "=", label: "дорівнює" },
+    { id: "!=", label: "не дорівнює" },
+    { id: ">", label: "більше" },
+    { id: ">=", label: "не менше" },
+    { id: "<", label: "менше" },
+    { id: "<=", label: "не більше" },
+    { id: "LIKE", label: "містить текст" },
+    { id: "LIKE_UPPER", label: "містить текст (без регістру)" },
+    { id: "IN", label: "одне зі списку (через кому)" },
+    { id: "NOT IN", label: "не входить до списку (через кому)" },
+    { id: "IS NULL", label: "порожнє / відсутнє" },
+    { id: "IS NOT NULL", label: "заповнене" },
+    { id: "BETWEEN", label: "у діапазоні (від, до)" },
+  ],
+  aggregates: [
+    { id: "", label: "просто показати (як є)" },
+    { id: "SUM", label: "порахувати суму" },
+    { id: "AVG", label: "порахувати середнє" },
+    { id: "COUNT", label: "порахувати кількість" },
+    { id: "COUNT_DISTINCT", label: "порахувати унікальні" },
+    { id: "MIN", label: "знайти мінімум" },
+    { id: "MAX", label: "знайти максимум" },
+  ],
+  outputModes: [
+    { id: "select", label: "Показати вибірку" },
+    { id: "ctas", label: "Зберегти у нову таблицю" },
+    { id: "drop_ctas", label: "Перезаписати таблицю (видалити стару)" },
+  ],
+  metrics: [
+    { id: "payroll", label: "Фонд оплати", tables: ["t6_2026_edrpou"], expression: "SUM({t6_2026_edrpou}.sum_narah)", alias: "payroll_sum" },
+    { id: "contributions", label: "Внески ЄСВ", tables: ["t6_2026_edrpou"], expression: "SUM({t6_2026_edrpou}.sum_narah_vnes)", alias: "esv_sum" },
+    { id: "people_count", label: "Кількість осіб", tables: ["t6_2026_edrpou"], expression: "COUNT(DISTINCT {t6_2026_edrpou}.kod_zo)", alias: "people_count" },
+    { id: "insurers_count", label: "Кількість страхувальників", tables: ["t6_2026_edrpou"], expression: "COUNT(DISTINCT {t6_2026_edrpou}.edrpou)", alias: "insurers_count" },
+    { id: "rows_count", label: "Кількість рядків", tables: [], expression: "COUNT(*)", alias: "rows_count" },
+    { id: "raw_payroll", label: "Фонд оплати (сира Т6 зі сторнуванням)", tables: ["sm_packlabel", "sm_ape4_6data"], expression: "SUM(CASE WHEN {sm_ape4_6data}.aped46_pay_tp IN (3, 5, 7, 9, 12) THEN -ABS({sm_ape4_6data}.aped46_sum) ELSE {sm_ape4_6data}.aped46_sum END)", alias: "payroll_sum" },
+  ],
+  systemFilters: [
+    { tables: ["sm_packlabel", "sm_ape4_6data"], expressions: ["{sm_packlabel}.slb_fixed = 'Y'", "{sm_packlabel}.slb_actuality = 'Y'", "{sm_packlabel}.slb_st = 'O'", "{sm_ape4_6data}.aped46_st = 'O'"] },
+  ],
+  semanticPresets: [
+    { id: "current_insurer_profile", label: "Актуальні реквізити та КВЕД страхувальника", mode: "current", tables: ["pinsur_main", "pinsur_chng_doc", "pinsur_kved_hst", "pinsur_kved"], filters: ["{pinsur_main}.im_st IN ('A', 'L')", "{pinsur_chng_doc}.ih_st_actual = 'A'", "{pinsur_kved}.iv_tp = 'Y'"], sourceFile: "наданий робочий SQL", description: "Чинний страхувальник, актуальний документ і КВЕД" },
+  ],
+  semanticRules: [
+    { id: "current_insurer", table: "pinsur_main", mode: "current", predicates: ["{pinsur_main}.im_st IN ('A', 'L')"], sourceFile: "наданий робочий SQL", description: "Чинний запис страхувальника" },
+    { id: "actual_change_document", table: "pinsur_chng_doc", mode: "current", predicates: ["{pinsur_chng_doc}.ih_st_actual = 'A'"], sourceFile: "наданий робочий SQL", description: "Актуальний документ змін" },
+    { id: "actual_kved", table: "pinsur_kved", mode: "current", predicates: ["{pinsur_kved}.iv_tp = 'Y'"], sourceFile: "наданий робочий SQL", description: "Актуальний КВЕД у вибраній версії" },
+  ],
+  sources: {
+    latest_person_info: {
+      cte: "latest_person_info AS (\n  SELECT *\n  FROM (\n    SELECT ipi_src.*, ROW_NUMBER() OVER (PARTITION BY numident ORDER BY modify_dt DESC NULLS LAST, ip_id DESC) AS sqlm_rn\n    FROM ikis_person.insured_person_info ipi_src\n  )\n  WHERE sqlm_rn = 1\n)",
+      from: "latest_person_info",
+    },
+    latest_person_identity: {
+      cte: "latest_person_identity AS (\n  SELECT *\n  FROM (\n    SELECT keyed.*, ROW_NUMBER() OVER (PARTITION BY sqlm_match_key ORDER BY modify_dt DESC NULLS LAST, ip_id DESC) AS sqlm_rn\n    FROM (\n      SELECT ipi_src.*,\n             CASE\n               WHEN TRIM(ipi_src.numident) IS NOT NULL THEN TRIM(ipi_src.numident)\n               WHEN TRIM(ipi_src.pass_serial) IS NOT NULL THEN 'БК' || UPPER(TRIM(ipi_src.pass_serial)) || TRIM(ipi_src.pass_number)\n               WHEN TRIM(ipi_src.pass_number) IS NOT NULL THEN 'П' || TRIM(ipi_src.pass_number)\n             END AS sqlm_match_key\n      FROM ikis_person.insured_person_info ipi_src\n    ) keyed\n  )\n  WHERE sqlm_rn = 1\n)",
+      from: "latest_person_identity",
+    },
+    ape45_by_person: {
+      cte: "ape45_by_person AS (\n  SELECT aped45_slb, aped45_numident,\n         MIN(aped45_start_dt) AS aped45_start_dt,\n         MAX(aped45_stop_dt) AS aped45_stop_dt,\n         COUNT(*) AS period_count\n  FROM ikis_websm.sm_ape4_5data\n  GROUP BY aped45_slb, aped45_numident\n)",
+      from: "ape45_by_person",
+    },
+    ape45_employment_with_period: {
+      cte: "ape45_employment_with_period AS (\n  SELECT d5_src.*,\n         plb_src.slb_im AS sqlm_slb_im,\n         plb_src.slb_charg_year AS sqlm_year,\n         plb_src.slb_charg_mnth AS sqlm_month\n  FROM ikis_websm.sm_ape4_5data d5_src\n  JOIN ikis_websm.sm_packlabel plb_src\n    ON plb_src.slb_id = d5_src.aped45_slb\n)",
+      from: "ape45_employment_with_period",
+    },
+    ape45_latest_position_by_insurer: {
+      cte: "ape45_latest_position_by_insurer AS (\n  SELECT *\n  FROM (\n    SELECT d5_src.*,\n           plb_src.slb_im AS sqlm_slb_im,\n           plb_src.slb_charg_year AS sqlm_year,\n           plb_src.slb_charg_mnth AS sqlm_month,\n           ROW_NUMBER() OVER (\n             PARTITION BY plb_src.slb_im, d5_src.aped45_numident\n             ORDER BY d5_src.aped45_date_hire DESC NULLS LAST,\n                      plb_src.slb_charg_year DESC,\n                      plb_src.slb_charg_mnth DESC,\n                      d5_src.aped45_recnum DESC\n           ) AS sqlm_position_rn\n    FROM ikis_websm.sm_ape4_5data d5_src\n    JOIN ikis_websm.sm_packlabel plb_src\n      ON plb_src.slb_id = d5_src.aped45_slb\n  )\n  WHERE sqlm_position_rn = 1\n)",
+      from: "ape45_latest_position_by_insurer",
+    },
+    ape45_position_as_of_t6_month: {
+      cte: "ape45_position_as_of_t6_month AS (\n  SELECT *\n  FROM (\n    SELECT d5_src.*,\n           plb_src.slb_im AS sqlm_slb_im,\n           t6_src.year AS sqlm_t6_year,\n           t6_src.aped46_mnth AS sqlm_t6_month,\n           t6_src.kat_zo AS sqlm_t6_kat_zo,\n           ROW_NUMBER() OVER (\n             PARTITION BY t6_src.slb_im, t6_src.kod_zo, t6_src.year, t6_src.aped46_mnth, t6_src.kat_zo\n             ORDER BY d5_src.aped45_date_hire DESC NULLS LAST,\n                      plb_src.slb_charg_year DESC,\n                      plb_src.slb_charg_mnth DESC,\n                      d5_src.aped45_recnum DESC\n           ) AS sqlm_position_rn\n    FROM vasiliuk_u.t6_2026_edrpou t6_src\n    JOIN ikis_websm.sm_packlabel plb_src\n      ON plb_src.slb_im = t6_src.slb_im\n     AND (plb_src.slb_charg_year * 100 + plb_src.slb_charg_mnth)\n         <= (t6_src.year * 100 + t6_src.aped46_mnth)\n    JOIN ikis_websm.sm_ape4_5data d5_src\n      ON d5_src.aped45_slb = plb_src.slb_id\n     AND d5_src.aped45_numident = t6_src.kod_zo\n    WHERE d5_src.aped45_date_hire IS NULL\n       OR d5_src.aped45_date_hire <= LAST_DAY(TO_DATE(t6_src.year || LPAD(t6_src.aped46_mnth, 2, '0'), 'YYYYMM'))\n  )\n  WHERE sqlm_position_rn = 1\n)",
+      from: "ape45_position_as_of_t6_month",
+    },
+  },
+};
+window.SQL_SCHEMA.getTable = function (id) {
+  return this.tables.find((t) => t.id === id);
+};
+
+</script>
+    <script>
+window.SqlBuilder = (function () {
+  const VALUE_OPS = new Set(["=", "!=", ">", ">=", "<", "<=", "LIKE", "LIKE_UPPER", "IN", "NOT IN", "BETWEEN"]);
+  const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_$#]*(\.[A-Za-z][A-Za-z0-9_$#]*)?$/;
+
+  function table(id) { return SQL_SCHEMA.getTable(id); }
+  function column(tableId, name) { return table(tableId)?.columns.find((item) => item.name === name); }
+  function col(alias, name) { return `${alias}.${name}`; }
+  function escapeLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
+  function unique(values) { return [...new Set(values)]; }
+  function replaceAliases(expression, aliases) {
+    return expression.replace(/\{([^}]+)\}/g, (_, id) => aliases[id] || `{${id}}`);
+  }
+  function columnExpression(tableId, name, aliases) {
+    const info = column(tableId, name);
+    if (info?.semanticExpression && (info.requires || []).every((id) => aliases[id])) {
+      return replaceAliases(info.semanticExpression, aliases);
+    }
+    return col(aliases[tableId], name);
+  }
+
+  function assignAliases(tableIds) {
+    const aliases = {};
+    const used = new Set();
+    [...tableIds].sort().forEach((id) => {
+      const source = table(id);
+      if (!source) return;
+      let alias = source.defaultAlias;
+      let suffix = 2;
+      while (used.has(alias.toUpperCase())) alias = `${source.defaultAlias}${suffix++}`;
+      aliases[id] = alias;
+      used.add(alias.toUpperCase());
+    });
+    return aliases;
+  }
+
+  function normalizedEdges(state, catalog = SQL_SCHEMA.joins) {
+    const overrides = new Map((state.joins || []).filter((edge) => edge.id).map((edge) => [edge.id, edge]));
+    return catalog.map((catalogEdge) => {
+        const edge = { ...catalogEdge, ...(overrides.get(catalogEdge.id) || {}) };
+        const latestVariant = state.latestPersonOnly && !edge.selectedVariant
+          ? edge.variants?.find((item) => item.isLatest)
+          : null;
+        const variant = edge.variants?.find((item) => item.id === edge.selectedVariant) || latestVariant || edge.variants?.[0];
+        return {
+        id: edge.id,
+        left: edge.left || edge.leftTable,
+        right: edge.right || edge.rightTable,
+        conditions: variant?.conditions || edge.conditions || (edge.leftCol && edge.rightCol ? [{ leftCol: edge.leftCol, rightCol: edge.rightCol }] : []),
+        type: edge.type || "INNER",
+        cardinality: edge.cardinality || "N:M",
+        preferredRoot: edge.preferredRoot,
+        leftSource: variant?.leftSource || edge.leftSource,
+        rightSource: variant?.rightSource || edge.rightSource,
+        note: edge.note || "",
+        warning: edge.warning || "",
+        endpointsOnly: edge.endpointsOnly === true,
+        isDefault: edge.isDefault !== false,
+        weight: Number(edge.weight) || (edge.isDefault === false ? 20 : 5),
+        variants: edge.variants || [],
+        selectedVariant: variant?.id || "",
+        };
+      });
+  }
+
+  function chooseRoot(selected, edges) {
+    const preferred = edges.map((edge) => edge.preferredRoot).filter((id) => selected.includes(id)).sort();
+    if (preferred.length) return preferred[0];
+    return [...selected].sort((a, b) => (table(a)?.fullName || a).localeCompare(table(b)?.fullName || b))[0];
+  }
+
+  function shortestPath(startSet, target, edges) {
+    const queue = [...startSet].map((node) => ({ node, cost: 0, path: [], signature: "" }));
+    const best = new Map();
+    const solutions = [];
+    while (queue.length) {
+      queue.sort((a, b) => a.cost - b.cost || a.signature.localeCompare(b.signature));
+      const current = queue.shift();
+      if (current.cost > (best.get(current.node) ?? Infinity)) continue;
+      best.set(current.node, current.cost);
+      if (current.node === target) { solutions.push(current); continue; }
+      edges.filter((edge) => edge.isDefault && (edge.left === current.node || edge.right === current.node)).forEach((edge) => {
+        const next = edge.left === current.node ? edge.right : edge.left;
+        if (current.path.some((item) => item.edge.id === edge.id)) return;
+        const cost = current.cost + edge.weight;
+        if (cost > (best.get(next) ?? Infinity)) return;
+        const step = { edge, from: current.node, to: next };
+        queue.push({ node: next, cost, path: [...current.path, step], signature: `${current.signature}|${edge.id}` });
+      });
+    }
+    if (!solutions.length) return { path: null, ambiguous: false };
+    solutions.sort((a, b) => a.cost - b.cost || a.signature.localeCompare(b.signature));
+    const minimum = solutions[0].cost;
+    const tied = unique(solutions.filter((item) => item.cost === minimum).map((item) => item.signature));
+    return { path: solutions[0].path, ambiguous: tied.length > 1 };
+  }
+
+  function resolveJoinGraph(selectedTableIds, joinCatalog, overrides) {
+    const userTables = unique(selectedTableIds.filter((id) => table(id))).sort();
+    const state = { joins: overrides || [] };
+    const catalogEdges = joinCatalog
+      ? (joinCatalog.every((edge) => typeof edge.weight === "number" && typeof edge.isDefault === "boolean")
+        ? joinCatalog
+        : normalizedEdges(state, joinCatalog))
+      : normalizedEdges(state);
+    const errors = [];
+    const warnings = [];
+    if (!userTables.length) return { root: null, userTables, bridgeTables: [], allTables: [], edges: [], errors: ["Оберіть хоча б одне джерело."], warnings };
+    const edges = catalogEdges.filter((edge) => !edge.endpointsOnly || (userTables.includes(edge.left) && userTables.includes(edge.right)));
+    const root = chooseRoot(userTables, edges);
+    const connected = new Set([root]);
+    const resolved = new Map();
+    userTables.filter((id) => id !== root).sort().forEach((target) => {
+      if (connected.has(target)) return;
+      const found = shortestPath(connected, target, edges);
+      if (!found.path) { errors.push(`Неможливо знайти шлях до джерела «${table(target)?.label || target}».`); return; }
+      if (found.ambiguous) { errors.push(`Для джерела «${table(target)?.label || target}» існує кілька рівноцінних маршрутів. Виберіть семантичний маршрут.`); return; }
+      found.path.forEach((step) => { resolved.set(step.edge.id, step.edge); connected.add(step.from); connected.add(step.to); });
+    });
+    const allTables = [...connected].sort();
+    const bridgeTables = allTables.filter((id) => !userTables.includes(id));
+    return { root, userTables, bridgeTables, allTables, edges: [...resolved.values()], errors, warnings };
+  }
+
+  function buildJoinPlan(state, selected) {
+    const errors = [];
+    const warnings = [];
+    const ctes = [];
+    const graph = resolveJoinGraph(selected, normalizedEdges(state), state.joins);
+    if (graph.errors.length) return { ...graph, errors: graph.errors, warnings, ctes, joins: [], aliases: assignAliases(graph.allTables) };
+    const aliases = assignAliases(graph.allTables);
+    const edges = graph.edges;
+    const root = graph.root;
+    const visited = new Set([root]);
+    const joins = [];
+    while (visited.size < graph.allTables.length) {
+      const candidates = edges
+        .filter((edge) => visited.has(edge.left) !== visited.has(edge.right))
+        .sort((a, b) => {
+          const aNext = visited.has(a.left) ? a.right : a.left;
+          const bNext = visited.has(b.left) ? b.right : b.left;
+          return aNext.localeCompare(bNext) || `${a.left}:${a.right}`.localeCompare(`${b.left}:${b.right}`);
+        });
+      const edge = candidates[0];
+      if (!edge) {
+        const missing = graph.allTables.filter((id) => !visited.has(id)).map((id) => table(id)?.label || id);
+        errors.push(`Неможливо зв’язати всі вибрані джерела. Без шляху залишилися: ${missing.join(", ")}. Додайте зв’язок у розширеному режимі або приберіть ці таблиці.`);
+        return { errors, warnings, ctes, root, joins: [] };
+      }
+      const forward = visited.has(edge.left);
+      const parent = forward ? edge.left : edge.right;
+      const child = forward ? edge.right : edge.left;
+      if (!edge.conditions.length) {
+        errors.push(`Для зв’язку ${edge.left} ↔ ${edge.right} не задано жодної умови.`);
+        return { errors, warnings, ctes, root, joins: [] };
+      }
+      const sourceKey = forward ? edge.rightSource : edge.leftSource;
+      const source = sourceKey ? SQL_SCHEMA.sources?.[sourceKey] : null;
+      if (source?.cte && !ctes.includes(source.cte)) ctes.push(source.cte);
+      const joinType = forward ? edge.type : ({ LEFT: "RIGHT", RIGHT: "LEFT" }[edge.type] || edge.type);
+      const conditions = edge.conditions.map((condition) => forward
+        ? `${col(aliases[parent], condition.leftCol)} = ${col(aliases[child], condition.rightCol)}`
+        : `${col(aliases[parent], condition.rightCol)} = ${col(aliases[child], condition.leftCol)}`);
+      joins.push({ table: child, sourceName: source?.from || table(child).fullName, alias: aliases[child], type: joinType, conditions, edge, forward });
+      const orientedCardinality = forward || edge.cardinality === "N:M"
+        ? edge.cardinality
+        : edge.cardinality.split("").reverse().join("");
+      if (orientedCardinality.endsWith(":N") || orientedCardinality === "N:M") {
+        warnings.push(`Зв’язок ${table(parent)?.label} → ${table(child)?.label} має кардинальність ${orientedCardinality} і може розмножити рядки.`);
+      }
+      if (edge.warning) warnings.push(edge.warning);
+      visited.add(child);
+    }
+    for (const join of joins) {
+      const edge = join.edge;
+      const rootSourceKey = edge.left === root ? edge.leftSource : edge.right === root ? edge.rightSource : null;
+      const rootSource = rootSourceKey ? SQL_SCHEMA.sources?.[rootSourceKey] : null;
+      if (rootSource?.cte && !ctes.includes(rootSource.cte)) ctes.push(rootSource.cte);
+    }
+    const hasManyChain = joins.filter((join) => /:N$/.test(join.edge.cardinality)).length >= 2;
+    if (hasManyChain) warnings.push("У страхувальника може бути декілька документів змін та декілька записів КВЕД. Суми T6 можуть розмножитися.");
+    return { ...graph, errors, warnings: unique(warnings), ctes, root, joins, aliases };
+  }
+
+  function sourceForRoot(root, joins) {
+    for (const join of joins) {
+      const edge = join.edge;
+      if (edge.left === root && edge.leftSource) return SQL_SCHEMA.sources?.[edge.leftSource]?.from;
+      if (edge.right === root && edge.rightSource) return SQL_SCHEMA.sources?.[edge.rightSource]?.from;
+    }
+    return null;
+  }
+
+  function parseScalar(value, type, errors, label) {
+    const raw = String(value ?? "").trim();
+    if (!raw) { errors.push(`${label}: введіть значення.`); return null; }
+    if (type === "NUMBER") {
+      if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) { errors.push(`${label}: очікується число з крапкою як десятковим роздільником.`); return null; }
+      return raw;
+    }
+    if (type === "DATE") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) { errors.push(`${label}: дата має бути у форматі РРРР-ММ-ДД.`); return null; }
+      const [year, month, day] = raw.split("-").map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+        errors.push(`${label}: такої календарної дати не існує.`); return null;
+      }
+      return `DATE '${raw}'`;
+    }
+    return escapeLiteral(raw);
+  }
+
+  function buildFilters(state, aliases, errors) {
+    const result = [];
+    (state.filters || []).forEach((filter, index) => {
+      if (!filter.table || !filter.column || !filter.op) return;
+      const alias = aliases[filter.table];
+      if (!alias) return;
+      const info = column(filter.table, filter.column);
+      const label = `Фільтр ${index + 1} (${info?.label || filter.column})`;
+      const left = columnExpression(filter.table, filter.column, aliases);
+      if (filter.op === "IS NULL" || filter.op === "IS NOT NULL") { result.push(`${left} ${filter.op}`); return; }
+      if (!VALUE_OPS.has(filter.op)) { errors.push(`${label}: невідомий оператор.`); return; }
+      const raw = String(filter.value ?? "").trim();
+      if (!raw) { errors.push(`${label}: порожнє значення не допускається; використайте «порожнє / відсутнє».`); return; }
+      if (filter.op === "BETWEEN") {
+        const parts = raw.split(",").map((item) => item.trim());
+        if (parts.length !== 2 || parts.some((item) => !item)) { errors.push(`${label}: для діапазону введіть рівно два значення через кому.`); return; }
+        const from = parseScalar(parts[0], info?.type, errors, `${label}, початок`);
+        const to = parseScalar(parts[1], info?.type, errors, `${label}, кінець`);
+        if (from && to) result.push(`${left} BETWEEN ${from} AND ${to}`);
+        return;
+      }
+      if (filter.op === "IN" || filter.op === "NOT IN") {
+        const parts = raw.split(",").map((item) => item.trim());
+        if (!parts.length || parts.some((item) => !item)) { errors.push(`${label}: список містить порожнє значення.`); return; }
+        const values = parts.map((item) => parseScalar(item, info?.type, errors, label));
+        if (values.every(Boolean)) result.push(`${left} ${filter.op} (${values.join(", ")})`);
+        return;
+      }
+      if (filter.op === "LIKE" || filter.op === "LIKE_UPPER") {
+        if (info?.type === "NUMBER" || info?.type === "DATE") { errors.push(`${label}: пошук тексту не можна застосувати до типу ${info.type}.`); return; }
+        const pattern = raw.includes("%") || raw.includes("_") ? raw : `%${raw}%`;
+        result.push(filter.op === "LIKE_UPPER" ? `UPPER(${left}) LIKE UPPER(${escapeLiteral(pattern)})` : `${left} LIKE ${escapeLiteral(pattern)}`);
+        return;
+      }
+      const value = parseScalar(raw, info?.type, errors, label);
+      if (value) result.push(`${left} ${filter.op} ${value}`);
+    });
+    return result;
+  }
+
+  function fieldExpression(item, aliases, withAlias, ctas) {
+    const base = columnExpression(item.table, item.column, aliases);
+    let expression = item.agg === "COUNT_DISTINCT" ? `COUNT(DISTINCT ${base})` : item.agg ? `${item.agg}(${base})` : base;
+    if (!withAlias) return expression;
+    const info = column(item.table, item.column);
+    const alias = item.outAlias || item.alias || (ctas ? item.column : info?.label || item.column);
+    return `${expression} AS "${String(alias).replace(/"/g, '""')}"`;
+  }
+
+  function metricExpression(id, aliases) {
+    const metric = SQL_SCHEMA.metrics?.find((item) => item.id === id);
+    if (!metric || metric.tables.some((tableId) => !aliases[tableId])) return null;
+    return { metric, expression: replaceAliases(metric.expression, aliases) };
+  }
+
+  function validateCtas(state, selected, fields, metrics, errors) {
+    if (!["ctas", "drop_ctas"].includes(state.mode)) return;
+    const target = String(state.targetTable || "").trim();
+    if (!IDENTIFIER.test(target)) errors.push("Назва CTAS-таблиці має бути коректним Oracle identifier: TABLE або SCHEMA.TABLE.");
+    if (!fields.length && !metrics.length && selected.length > 1) errors.push("SELECT * заборонено для CTAS із кількома джерелами. Оберіть колонки й задайте технічні аліаси.");
+    const aliases = fields.map((item) => item.outAlias || item.alias || item.column).concat(metrics.map((item) => item.metric.alias));
+    aliases.forEach((alias) => { if (!IDENTIFIER.test(alias)) errors.push(`Некоректний технічний аліас CTAS: ${alias}.`); });
+    const folded = aliases.map((alias) => alias.toUpperCase());
+    if (new Set(folded).size !== folded.length) errors.push("Технічні аліаси CTAS мають бути унікальними без урахування регістру.");
+  }
+
+  function build(state) {
+    const selected = unique((state.tables || []).filter((id) => table(id))).sort();
+    const plan = buildJoinPlan(state, selected);
+    const aliases = plan.aliases;
+    const errors = [...plan.errors];
+    const warnings = [...plan.warnings];
+    if (errors.length) return { sql: "", errors, warnings, aliases, graph: plan };
+    const fields = state.fields || [];
+    const metrics = (state.metrics || []).map((id) => metricExpression(id, aliases)).filter(Boolean);
+    validateCtas(state, selected, fields, metrics, errors);
+    const where = buildFilters(state, aliases, errors);
+    (SQL_SCHEMA.systemFilters || []).forEach((rule) => {
+      if (rule.tables.every((id) => plan.allTables.includes(id))) rule.expressions.forEach((expression) => where.push(replaceAliases(expression, aliases)));
+    });
+    (state.presets || []).forEach((presetId) => {
+      const preset = SQL_SCHEMA.semanticPresets?.find((item) => item.id === presetId);
+      if (!preset) return;
+      if (!preset.tables.every((id) => plan.allTables.includes(id))) errors.push(`Preset «${preset.label}» потребує джерел: ${preset.tables.join(", ")}.`);
+      else preset.filters.forEach((expression) => where.push(replaceAliases(expression, aliases)));
+    });
+    if (errors.length) return { sql: "", errors: unique(errors), warnings, aliases };
+
+    const ctas = ["ctas", "drop_ctas"].includes(state.mode);
+    const selectItems = fields.map((item) => fieldExpression(item, aliases, true, ctas));
+    metrics.forEach(({ metric, expression }) => selectItems.push(`${expression} AS "${metric.alias}"`));
+    if (!selectItems.length) selected.forEach((id) => selectItems.push(`${aliases[id]}.*`));
+    const rootSource = sourceForRoot(plan.root, plan.joins) || table(plan.root).fullName;
+    let from = `FROM ${rootSource} ${aliases[plan.root]}`;
+    plan.joins.forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
+    const groupBy = fields.filter((item) => !item.agg).map((item) => fieldExpression(item, aliases, false, ctas));
+    const hasAggregate = metrics.length || fields.some((item) => item.agg);
+    const selectKeyword = state.parallel8 ? "SELECT /*+ PARALLEL(8) */" : "SELECT";
+    let sql = `${selectKeyword}\n       ${selectItems.join(",\n       ")}\n${from}`;
+    if (where.length) sql += `\n WHERE ${unique(where).join("\n   AND ")}`;
+    if (hasAggregate && groupBy.length) sql += `\n GROUP BY\n       ${unique(groupBy).join(",\n       ")}`;
+    const order = (state.orderBy || []).map((item) => {
+      if (item.fieldIndex != null && fields[item.fieldIndex]) return `${fieldExpression(fields[item.fieldIndex], aliases, false, ctas)} ${item.dir || "ASC"}`;
+      if (item.table && item.column && aliases[item.table]) return `${col(aliases[item.table], item.column)} ${item.dir || "ASC"}`;
+      return null;
+    }).filter(Boolean);
+    if (order.length) sql += `\n ORDER BY ${order.join(", ")}`;
+    sql += ";";
+    if (plan.ctes.length) sql = `WITH\n${plan.ctes.map((cte) => `  ${cte.replace(/\n/g, "\n  ")}`).join(",\n")}\n${sql}`;
+    if (state.mode === "ctas") sql = `CREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    if (state.mode === "drop_ctas") {
+      warnings.push(`Увага: DROP TABLE ${state.targetTable.trim()} PURGE безповоротно видалить поточну таблицю перед створенням нової.`);
+      sql = `DROP TABLE ${state.targetTable.trim()} PURGE;\n\nCREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    }
+    return { sql, errors: [], warnings: unique(warnings), aliases, graph: plan };
+  }
+
+  function buildSelect(state) {
+    const result = build(state);
+    if (result.errors.length) return result.errors.map((error) => `-- ПОМИЛКА: ${error}`).join("\n");
+    return result.sql;
+  }
+
+  function suggestJoinsForTables(tableIds) {
+    const selected = new Set(tableIds);
+    return SQL_SCHEMA.joins.filter((edge) => selected.has(edge.left) && selected.has(edge.right)).map((edge) => ({
+      id: edge.id,
+      leftTable: edge.left, rightTable: edge.right, conditions: edge.conditions.map((item) => ({ ...item })),
+      type: edge.type, cardinality: edge.cardinality, preferredRoot: edge.preferredRoot,
+      leftSource: edge.leftSource, rightSource: edge.rightSource, note: edge.note || "",
+      variants: edge.variants?.map((variant) => ({ ...variant, conditions: variant.conditions.map((item) => ({ ...item })) })) || [],
+      selectedVariant: edge.variants?.[0]?.id || "",
+    }));
+  }
+
+  return { build, buildSelect, suggestJoinsForTables, assignAliases, resolveJoinGraph };
+})();
+
+</script>
+    <script>
+window.TemplateUtils = (function () {
+  function clamp(value, min, max, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, Math.trunc(number)));
+  }
+
+  function normalize(settings) {
+    const firstYear = clamp(settings.yearStart, 2000, 2100, 2022);
+    const secondYear = clamp(settings.yearEnd, 2000, 2100, firstYear);
+    const firstMonth = clamp(settings.monthStart, 1, 12, 1);
+    const secondMonth = clamp(settings.monthEnd, 1, 12, firstMonth);
+    return {
+      yearStart: Math.min(firstYear, secondYear),
+      yearEnd: Math.max(firstYear, secondYear),
+      monthStart: Math.min(firstMonth, secondMonth),
+      monthEnd: Math.max(firstMonth, secondMonth),
+      otk: ["1", "0"].includes(String(settings.otk)) ? String(settings.otk) : "any",
+    };
+  }
+
+  function apply(sql, settings) {
+    const value = normalize(settings);
+    const otkCondition = value.otk === "any" ? "" : `AND pd.aped46_otk = ${value.otk}`;
+    return sql
+      .replace(/\{\{YEAR_START\}\}/g, String(value.yearStart))
+      .replace(/\{\{YEAR_END\}\}/g, String(value.yearEnd))
+      .replace(/\{\{MONTH_START\}\}/g, String(value.monthStart).padStart(2, "0"))
+      .replace(/\{\{MONTH_END\}\}/g, String(value.monthEnd).padStart(2, "0"))
+      .replace(/\{\{APED46_OTK_CONDITION\}\}/g, otkCondition);
+  }
+
+  return { apply, normalize };
+})();
+
+</script>
+    <script>
+(function () {
+  const state = {
+    step: 1,
+    tables: [],
+    joins: [],
+    fields: [],
+    filters: [],
+    orderBy: [],
+    metrics: [],
+    presets: [],
+    latestPersonOnly: false,
+    parallel8: false,
+    mode: "select",
+    targetTable: "work_result",
+  };
+  const MAX_STEP = 6;
+  const TEMPLATE_SCRIPTS = [
+    {
+      id: "t6_2026_edrpou",
+      title: "t6_edrpou",
+      description:
+        "Скрипт для створення зведення з пакетів T6 за вибраний період.",
+      sql: `drop table t6_2026_edrpou purge;
+create table t6_2026_edrpou as
+select /*+parallel(pd,8)*/
+       lpad(mrd.mrd_reg_code, 2,0) reg,
+       slb_im,
+       ian_numident edrpou,
+       ian_name1,
+       pd.aped46_numident kod_zo,
+       cs_pfu.dwh_common.getdatefromnumident(aped46_numident) as birth_dt,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum) * -1 else pd.aped46_sum end) sum_narah,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum_pv) * -1 else pd.aped46_sum_pv end) sum_vrah,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum_narah) * -1 else pd.aped46_sum_narah end) sum_narah_vnes,
+       nvl(pd.aped46_mnth, plb.slb_charg_mnth) aped46_mnth,
+       nvl(pd.aped46_year, plb.slb_charg_year) year,
+       aped46_zo kat_zo,
+       case
+         when aped46_numident is not null
+           and aped46_numident not like '00000%'
+           and regexp_instr(aped46_numident, '\\D') = 0
+         then mod(substr(aped46_numident, length(aped46_numident) - 1, 1), 2)
+         else aped46_sex
+       end sex
+from ikis_websm.sm_packlabel plb
+join ikis_websm.sm_ape4_6data pd on plb.slb_id = pd.aped46_slb
+join ikis_sys.mrdorg mrd on plb.slb_org_mdzu = mrd.mrd_code
+join ikis_ersp.pinsur_main im on plb.slb_im = im.im_id
+join ikis_ersp.pinsur_chng_doc chd on im.im_ih = chd.ih_id
+join ikis_ersp.pinsur_ankt_a ankt on chd.ih_ian = ankt.ian_id
+where plb.slb_fixed = 'Y'
+  and plb.slb_actuality = 'Y'
+  and plb.slb_st = 'O'
+  and pd.aped46_st = 'O'
+  and nvl(pd.aped46_year, plb.slb_charg_year) between {{YEAR_START}} and {{YEAR_END}}
+  and nvl(aped46_mnth, slb_charg_mnth) between {{MONTH_START}} and {{MONTH_END}}
+  {{APED46_OTK_CONDITION}}
+group by lpad(mrd.mrd_reg_code, 2,0),
+         slb_im,
+         ian_numident,
+         pd.aped46_numident,
+         aped46_zo,
+         nvl(pd.aped46_year, plb.slb_charg_year),
+         nvl(pd.aped46_mnth, plb.slb_charg_mnth),
+         aped46_sex,
+         ian_name1;
+
+
+
+
+
+`,
+      },
+    {
+      id: "t1_2024",
+      title: "t1",
+      description:
+        "КВЕД і ознака бюджетної організації зі звітності APE 4-1 за вибраний період.",
+      sql: `DROP TABLE t1_2024;
+
+CREATE TABLE t1_2024 AS
+SELECT /*+ PARALLEL(plb, 8) */
+       plb.slb_im,
+       plb.slb_charg_mnth,
+       plb.slb_charg_year,
+       SUBSTR(app4.ape1_eco_act, 1, 5) AS kved,
+       MAX(app4.ape1_budg_org) AS ape1_budg_org
+FROM ikis_websm.sm_packlabel plb
+JOIN ikis_websm.sm_ape4_1 app4
+  ON app4.ape1_slb = plb.slb_id
+WHERE plb.slb_charg_year BETWEEN {{YEAR_START}} AND {{YEAR_END}}
+  AND plb.slb_charg_mnth BETWEEN {{MONTH_START}} AND {{MONTH_END}}
+  AND plb.slb_system = 1
+  AND plb.slb_actuality = 'Y'
+  AND plb.slb_fixed = 'Y'
+  AND plb.slb_st = 'O'
+  AND app4.ape1_st = 'O'
+GROUP BY plb.slb_im,
+         plb.slb_charg_mnth,
+         plb.slb_charg_year,
+         SUBSTR(app4.ape1_eco_act, 1, 5);
+
+SELECT *
+FROM t1_2024;
+`,
+    },
+    {
+      id: "t2_2022",
+      title: "t2",
+      description:
+        "Зведення категорій ЗО, утримань і внесків із SK_APEQ_DODATOK2_DATA за вибраний період.",
+      sql: `CREATE TABLE t2_2022 AS
+SELECT /*+ PARALLEL(t, 8) */
+       TO_CHAR(LPAD(spl.spl_ru, 2, 0)) AS reg,
+       t.apqd2_zo AS cat_zo,
+       t.apqd2_numident AS numid,
+       t.apqd2_mnth AS mnth,
+       SUM(t.apqd2_sum_pv) AS sum_vrah,
+       SUM(t.apqd2_sum_v) AS sum_vnes,
+       spl.spl_im
+FROM ikis_websm.sk_apeq_dodatok2_data t
+JOIN ikis_websm.sk_packlabel spl
+  ON spl.spl_id = t.apqd2_spl
+JOIN ikis_websm.sk_packlabel_extended sple
+  ON sple.sple_id = spl.spl_id
+WHERE t.apqd2_year BETWEEN {{YEAR_START}} AND {{YEAR_END}}
+  AND t.apqd2_mnth BETWEEN {{MONTH_START}} AND {{MONTH_END}}
+  AND t.apqd2_st = 'O'
+  AND spl.spl_actuality = 'Y'
+GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
+         t.apqd2_zo,
+         t.apqd2_numident,
+         t.apqd2_mnth,
+         spl.spl_im;
+`,
+    },
+  ];
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  function tLabel(id) {
+    return SQL_SCHEMA.getTable(id)?.label || id;
+  }
+  function cLabel(tableId, col) {
+    const t = SQL_SCHEMA.getTable(tableId);
+    return t?.columns.find((x) => x.name === col)?.label || col;
+  }
+  function notify(msg, ok = true) {
+    const el = $("#toast");
+    el.textContent = msg;
+    el.classList.toggle("error", !ok);
+    el.classList.add("show");
+    clearTimeout(notify._t);
+    notify._t = setTimeout(() => el.classList.remove("show"), 2200);
+  }
+  function syncSteps() {
+    $$(".step-pill").forEach((el) => {
+      const n = Number(el.dataset.step);
+      el.classList.toggle("active", n === state.step);
+      el.classList.toggle("done", n < state.step);
+    });
+    $$(".panel[data-step]").forEach((p) => {
+      p.classList.toggle("active", Number(p.dataset.step) === state.step);
+    });
+    $("#btn-back").disabled = state.step <= 1;
+    $("#btn-next").textContent =
+      state.step >= MAX_STEP ? "Оновити SQL" : "Далі";
+  }
+  function renderCatalog() {
+    const root = $("#table-catalog");
+    root.innerHTML = "";
+    const byGroup = {};
+    SQL_SCHEMA.tables.forEach((t) => {
+      (byGroup[t.group] ||= []).push(t);
+    });
+    Object.keys(byGroup).forEach((g) => {
+      const sec = document.createElement("section");
+      sec.className = "catalog-group";
+      sec.innerHTML = `<h3>${SQL_SCHEMA.schemas[g] || g}</h3>`;
+      const grid = document.createElement("div");
+      grid.className = "card-grid";
+      byGroup[g].forEach((t) => {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className =
+          "table-card" + (state.tables.includes(t.id) ? " selected" : "");
+        card.innerHTML = `
+          <span class="t-title">${t.label}</span>
+          <span class="t-desc">${t.description || ""}</span>
+          <span class="t-tech">${t.fullName}</span>
+        `;
+        card.addEventListener("click", () => toggleTable(t.id));
+        grid.appendChild(card);
+      });
+      sec.appendChild(grid);
+      root.appendChild(sec);
+    });
+    $("#selected-count").textContent = String(state.tables.length);
+  }
+  function toggleTable(id) {
+    const i = state.tables.indexOf(id);
+    if (i >= 0) state.tables.splice(i, 1);
+    else state.tables.push(id);
+    state.fields = state.fields.filter((f) => state.tables.includes(f.table));
+    state.metrics = state.metrics.filter((id) => {
+      const metric = SQL_SCHEMA.metrics.find((m) => m.id === id);
+      return metric && metric.tables.every((tableId) => state.tables.includes(tableId));
+    });
+    state.filters = state.filters.filter((f) => state.tables.includes(f.table));
+    state.orderBy = state.orderBy.filter((o) => {
+      if (o.fieldIndex != null) return o.fieldIndex < state.fields.length;
+      return state.tables.includes(o.table);
+    });
+    renderCatalog();
+    renderSelectedStrip();
+    updateSql();
+  }
+  function renderSelectedStrip() {
+    const el = $("#selected-strip");
+    if (!state.tables.length) {
+      el.innerHTML = `<span class="muted">Натисніть картку нижче, щоб додати джерело</span>`;
+      return;
+    }
+    el.innerHTML = state.tables
+      .map(
+        (id, idx) =>
+          `<span class="chip"><b>${idx + 1}.</b> ${tLabel(id)}
+          <button type="button" data-rm="${id}" title="Прибрати">×</button></span>`
+      )
+      .join("");
+    $$("[data-rm]", el).forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleTable(b.dataset.rm);
+      })
+    );
+  }
+  function renderJoins() {
+    const root = $("#joins-list");
+    const hint = $("#joins-hint");
+    root.innerHTML = "";
+    if (!state.tables.length) {
+      hint.textContent = "Спочатку оберіть джерела на кроці 1.";
+      return;
+    }
+    if (state.tables.length === 1) {
+      hint.textContent =
+        "Одне джерело — з’єднувати нічого. Переходьте до «Результат».";
+      return;
+    }
+    hint.textContent = "Зв’язки будуються автоматично як граф. Порядок вибору джерел не впливає на SQL.";
+    const result = SqlBuilder.build(state);
+    const graph = result.graph;
+    const bridges = graph?.bridgeTables || [];
+    $("#bridge-info").textContent = bridges.length
+      ? `Автоматично додані проміжні таблиці: ${bridges.map(tLabel).join(", ")}`
+      : "";
+    (graph?.edges || []).forEach((edge, idx) => root.appendChild(joinRow({
+      ...edge,
+      leftTable: edge.left,
+      rightTable: edge.right,
+    }, idx)));
+  }
+  function joinRow(j, idx) {
+    const row = document.createElement("div");
+    row.className = "join-row";
+    const conditions = (j.conditions || []).map((condition) =>
+      `<div class="join-line"><code>${cLabel(j.leftTable, condition.leftCol)}</code><span class="join-word">=</span><code>${cLabel(j.rightTable, condition.rightCol)}</code></div>`
+    ).join("");
+    const variants = (j.variants || []).map((variant) =>
+      `<option value="${variant.id}" ${variant.id === j.selectedVariant ? "selected" : ""}>${variant.label}</option>`
+    ).join("");
+    row.innerHTML = `
+      <div class="join-plain">
+        <div class="join-line">
+          <strong>${tLabel(j.leftTable)}</strong><span class="join-word">→</span><strong>${tLabel(j.rightTable)}</strong>
+          <span class="badge">${j.type} · ${j.cardinality || "невідомо"}</span>
+        </div>
+        ${variants ? `<label class="join-line"><span class="join-word">Спосіб зіставлення:</span><select data-join-variant>${variants}</select></label>` : ""}
+        ${conditions}
+        ${j.note ? `<div class="join-note">${j.note}</div>` : ""}
+      </div>
+    `;
+    $("[data-join-variant]", row)?.addEventListener("change", (event) => {
+      const selectedVariant = event.target.value;
+      const existing = state.joins.find((item) => item.id === j.id);
+      if (existing) existing.selectedVariant = selectedVariant;
+      else state.joins.push({ id: j.id, selectedVariant });
+      renderJoins();
+      updateSql();
+    });
+    return row;
+  }
+  function colOptions(tableId, selected) {
+    return (SQL_SCHEMA.getTable(tableId)?.columns || [])
+      .map(
+        (c) =>
+          `<option value="${c.name}" ${c.name === selected ? "selected" : ""}>${c.label}</option>`
+      )
+      .join("");
+  }
+  function renderModeUi() {
+    $("#mode-select").value = state.mode;
+    const show = state.mode === "ctas" || state.mode === "drop_ctas";
+    $("#target-wrap").style.display = show ? "flex" : "none";
+  }
+  function renderFields() {
+    const avail = $("#fields-available");
+    const chosen = $("#fields-chosen");
+    const emptyHint = $("#fields-empty-hint");
+    const countEl = $("#chosen-count");
+    if (!avail || !chosen) return;
+    renderMetrics();
+    avail.innerHTML = "";
+    chosen.innerHTML = "";
+    if (!state.tables.length) {
+      avail.innerHTML = `<p class="hint">Немає джерел — крок 1.</p>`;
+      emptyHint.hidden = false;
+      if (countEl) countEl.textContent = "0";
+      return;
+    }
+    state.tables.forEach((tid) => {
+      const t = SQL_SCHEMA.getTable(tid);
+      const box = document.createElement("div");
+      box.className = "avail-group";
+      box.innerHTML = `<div class="avail-title">${t.label}</div>`;
+      const chips = document.createElement("div");
+      chips.className = "avail-chips";
+      t.columns.forEach((c) => {
+        const already = state.fields.some(
+          (f) => f.table === tid && f.column === c.name
+        );
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "avail-chip" + (already ? " used" : "");
+        btn.disabled = already;
+        btn.innerHTML = already
+          ? `<span>${c.label}</span><span class="chip-tag">вже додано</span>`
+          : `<span>${c.label}</span><span class="chip-plus">+</span>`;
+        btn.title = already ? "Уже у відповіді" : "Додати у відповідь";
+        if (!already) {
+          btn.addEventListener("click", () => {
+            state.fields.push({
+              table: tid,
+              column: c.name,
+              agg: "",
+              outAlias: "",
+            });
+            renderFields();
+            renderOrder();
+            updateSql();
+          });
+        }
+        chips.appendChild(btn);
+      });
+      box.appendChild(chips);
+      avail.appendChild(box);
+    });
+    if (countEl) countEl.textContent = String(state.fields.length);
+    emptyHint.hidden = state.fields.length > 0;
+    state.fields.forEach((f, idx) => {
+      const card = document.createElement("div");
+      card.className = "chosen-card";
+      const isNum = isNumericColumn(f.table, f.column);
+      const ops = SQL_SCHEMA.aggregates
+        .map((a) => {
+          return `<option value="${a.id}" ${
+            (f.agg || "") === a.id ? "selected" : ""
+          }>${a.label}</option>`;
+        })
+        .join("");
+      card.innerHTML = `
+        <div class="chosen-num">${idx + 1}</div>
+        <div class="chosen-body">
+          <div class="chosen-name">${cLabel(f.table, f.column)}</div>
+          <div class="chosen-from">з: ${tLabel(f.table)}</div>
+          <label class="chosen-op">
+            <span>Що зробити з полем?</span>
+            <select data-agg>${ops}</select>
+          </label>
+          ${
+            isNum
+              ? ""
+              : `<div class="chosen-tip">Текст / дата — зазвичай «без зміни (як у джерелі)»</div>`
+          }
+        </div>
+        <div class="chosen-actions">
+          <button type="button" class="btn ghost icon tiny" data-up title="Вище" ${
+            idx === 0 ? "disabled" : ""
+          }>↑</button>
+          <button type="button" class="btn ghost icon tiny" data-down title="Нижче" ${
+            idx === state.fields.length - 1 ? "disabled" : ""
+          }>↓</button>
+          <button type="button" class="btn danger icon tiny" data-rm title="Прибрати">×</button>
+        </div>
+      `;
+      $("[data-agg]", card).addEventListener("change", (e) => {
+        f.agg = e.target.value;
+        renderOrder();
+        updateSql();
+      });
+      $("[data-rm]", card).addEventListener("click", () => {
+        state.fields.splice(idx, 1);
+        state.orderBy = state.orderBy
+          .map((o) => {
+            if (o.fieldIndex == null) return o;
+            if (o.fieldIndex === idx) return null;
+            if (o.fieldIndex > idx) return { ...o, fieldIndex: o.fieldIndex - 1 };
+            return o;
+          })
+          .filter(Boolean);
+        renderFields();
+        renderOrder();
+        updateSql();
+      });
+      $("[data-up]", card)?.addEventListener("click", () => {
+        if (idx <= 0) return;
+        [state.fields[idx - 1], state.fields[idx]] = [
+          state.fields[idx],
+          state.fields[idx - 1],
+        ];
+        swapOrderIndexes(idx, idx - 1);
+        renderFields();
+        renderOrder();
+        updateSql();
+      });
+      $("[data-down]", card)?.addEventListener("click", () => {
+        if (idx >= state.fields.length - 1) return;
+        [state.fields[idx], state.fields[idx + 1]] = [
+          state.fields[idx + 1],
+          state.fields[idx],
+        ];
+        swapOrderIndexes(idx, idx + 1);
+        renderFields();
+        renderOrder();
+        updateSql();
+      });
+      chosen.appendChild(card);
+    });
+  }
+  function renderMetrics() {
+    const root = $("#metrics-list");
+    if (!root) return;
+    root.innerHTML = "";
+    SQL_SCHEMA.metrics
+      .filter((metric) => metric.tables.every((tableId) => state.tables.includes(tableId)))
+      .forEach((metric) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "col-chip" + (state.metrics.includes(metric.id) ? " selected" : "");
+        button.textContent = metric.label;
+        button.addEventListener("click", () => {
+          const index = state.metrics.indexOf(metric.id);
+          if (index >= 0) state.metrics.splice(index, 1); else state.metrics.push(metric.id);
+          renderMetrics();
+          updateSql();
+        });
+        root.appendChild(button);
+      });
+  }
+  function isNumericColumn(tableId, colName) {
+    const t = SQL_SCHEMA.getTable(tableId);
+    const c = t?.columns.find((x) => x.name === colName);
+    const ty = (c?.type || "").toUpperCase();
+    return /NUMBER|INT|FLOAT|DECIMAL/.test(ty);
+  }
+  function swapOrderIndexes(a, b) {
+    state.orderBy.forEach((o) => {
+      if (o.fieldIndex === a) o.fieldIndex = b;
+      else if (o.fieldIndex === b) o.fieldIndex = a;
+    });
+  }
+  function renderOrder() {
+    const root = $("#order-list");
+    if (!root) return;
+    root.innerHTML = "";
+    if (!state.orderBy.length) {
+      root.innerHTML = `<p class="hint muted-box">Сортування не задано — можна лишити так.</p>`;
+    }
+    state.orderBy.forEach((o, idx) => root.appendChild(orderRow(o, idx)));
+  }
+  function orderRow(o, idx) {
+    const row = document.createElement("div");
+    row.className = "sort-card";
+    let fieldOpts = "";
+    if (state.fields.length) {
+      fieldOpts = state.fields
+        .map((f, i) => {
+          const op = f.agg
+            ? SQL_SCHEMA.aggregates.find((a) => a.id === f.agg)?.label + " · "
+            : "";
+          return `<option value="f:${i}" ${
+            o.fieldIndex === i ? "selected" : ""
+          }>${op}${cLabel(f.table, f.column)}</option>`;
+        })
+        .join("");
+    } else {
+      state.tables.forEach((tid) => {
+        SQL_SCHEMA.getTable(tid)?.columns.forEach((c) => {
+          const val = `c:${tid}.${c.name}`;
+          const selected =
+            o.fieldIndex == null && o.table === tid && o.column === c.name;
+          fieldOpts += `<option value="${val}" ${selected ? "selected" : ""}>${cLabel(
+            tid,
+            c.name
+          )}</option>`;
+        });
+      });
+    }
+    const dirOpts = [
+      { id: "ASC", label: "від меншого до більшого (А → Я)" },
+      { id: "DESC", label: "від більшого до меншого (Я → А)" },
+    ]
+      .map(
+        (d) =>
+          `<option value="${d.id}" ${
+            (o.dir || "ASC") === d.id ? "selected" : ""
+          }>${d.label}</option>`
+      )
+      .join("");
+    row.innerHTML = `
+      <label class="sort-field">
+        <span>Сортувати за</span>
+        <select data-k="target">${fieldOpts || "<option value=''>— додайте колонки —</option>"}</select>
+      </label>
+      <label class="sort-dir">
+        <span>Напрям</span>
+        <select data-k="dir">${dirOpts}</select>
+      </label>
+      <button type="button" class="btn danger icon" data-del title="Прибрати">×</button>
+    `;
+    $("[data-k=target]", row).addEventListener("change", (e) => {
+      const v = e.target.value;
+      if (v.startsWith("f:")) {
+        o.fieldIndex = Number(v.slice(2));
+        delete o.table;
+        delete o.column;
+        delete o.agg;
+      } else if (v.startsWith("c:")) {
+        const rest = v.slice(2);
+        const dot = rest.indexOf(".");
+        o.table = rest.slice(0, dot);
+        o.column = rest.slice(dot + 1);
+        o.fieldIndex = null;
+        const match = state.fields.find(
+          (f) => f.table === o.table && f.column === o.column && f.agg
+        );
+        o.agg = match?.agg || "";
+      }
+      updateSql();
+    });
+    $("[data-k=dir]", row).addEventListener("change", (e) => {
+      o.dir = e.target.value;
+      updateSql();
+    });
+    $("[data-del]", row).addEventListener("click", () => {
+      state.orderBy.splice(idx, 1);
+      renderOrder();
+      updateSql();
+    });
+    return row;
+  }
+  function renderFilters() {
+    const root = $("#filters-list");
+    root.innerHTML = "";
+    if (!state.tables.length) {
+      root.innerHTML = `<p class="hint">Спочатку оберіть джерела.</p>`;
+      return;
+    }
+    state.filters.forEach((f, idx) => root.appendChild(filterRow(f, idx)));
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "btn ghost";
+    add.textContent = "+ Додати умову";
+    add.addEventListener("click", () => {
+      const tid = state.tables[0];
+      state.filters.push({
+        table: tid,
+        column: SQL_SCHEMA.getTable(tid)?.columns[0]?.name || "",
+        op: "=",
+        value: "",
+      });
+      renderFilters();
+      updateSql();
+    });
+    root.appendChild(add);
+    renderQuickFilters();
+  }
+  function renderQuickFilters() {
+    const root = $("#quick-filters");
+    root.innerHTML = `<span class="muted">Швидко (з обраних полів):</span>`;
+    const chips = [];
+    const categorySource = state.tables.includes("t6_2026_edrpou")
+      ? { table: "t6_2026_edrpou", column: "kat_zo" }
+      : state.tables.includes("sm_ape4_6data")
+        ? { table: "sm_ape4_6data", column: "aped46_zo" }
+        : null;
+    if (categorySource) {
+      const military = "31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74";
+      const disability = "2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80";
+      chips.push(
+        { id: "military", label: "Військові", ...categorySource, op: "IN", value: military },
+        { id: "civilian", label: "Цивільні", ...categorySource, op: "NOT IN", value: military },
+        { id: "disability", label: "Особи з інвалідністю", ...categorySource, op: "IN", value: disability }
+      );
+    }
+    state.tables.forEach((tid) => {
+      const t = SQL_SCHEMA.getTable(tid);
+      (t?.columns || []).forEach((c) => {
+        const name = c.label.toLowerCase();
+        if (/\b(іпн|рнокпп|єдрпоу|код|номер)\b/i.test(c.label) || /ident|edrpou|kod|code|numident/i.test(c.name)) {
+          chips.push({
+            label: `${c.label} = …`,
+            table: tid,
+            column: c.name,
+            op: "=",
+            value: "",
+          });
+        } else if (/прізв|ім'|ім’я|назв|текст/i.test(name) || c.type === "VARCHAR2") {
+          if (/прізв|ім'|ім’я|назв|імя/i.test(name) || /name|ln_|fn_|sn_/i.test(c.name)) {
+            chips.push({
+              label: `${c.label} містить…`,
+              table: tid,
+              column: c.name,
+              op: "LIKE_UPPER",
+              value: "",
+            });
+          }
+        } else if (/дата|місяць|рік|період/i.test(name) || c.type === "DATE" || /year|mnth|_dt/i.test(c.name)) {
+          chips.push({
+            label: `${c.label} у діапазоні…`,
+            table: tid,
+            column: c.name,
+            op: "BETWEEN",
+            value: "",
+          });
+        }
+      });
+    });
+    const seen = new Set();
+    chips.slice(0, 24).forEach((ch) => {
+      const key = ch.id || `${ch.table}.${ch.column}.${ch.op}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (seen.size > 8) return;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "col-chip";
+      b.textContent = ch.label;
+      b.addEventListener("click", () => {
+        state.filters.push({
+          table: ch.table,
+          column: ch.column,
+          op: ch.op,
+          value: ch.value,
+        });
+        renderFilters();
+        updateSql();
+      });
+      root.appendChild(b);
+    });
+    if (seen.size === 0) {
+      root.innerHTML = "";
+    }
+  }
+  function filterRow(f, idx) {
+    const row = document.createElement("div");
+    row.className = "filter-row";
+    const tables = state.tables
+      .map(
+        (id) =>
+          `<option value="${id}" ${id === f.table ? "selected" : ""}>${tLabel(id)}</option>`
+      )
+      .join("");
+    const ops = SQL_SCHEMA.operators
+      .map(
+        (o) =>
+          `<option value="${o.id}" ${o.id === f.op ? "selected" : ""}>${o.label}</option>`
+      )
+      .join("");
+    const needVal = f.op !== "IS NULL" && f.op !== "IS NOT NULL";
+    const ph =
+      f.op === "BETWEEN"
+        ? "від, до"
+        : f.op === "IN"
+          ? "a, b, c"
+          : f.op === "LIKE" || f.op === "LIKE_UPPER"
+            ? "фрагмент"
+            : "значення";
+    row.innerHTML = `
+      <select data-k="table">${tables}</select>
+      <select data-k="column">${colOptions(f.table, f.column)}</select>
+      <select data-k="op">${ops}</select>
+      <input type="text" data-k="value" placeholder="${ph}" value="${
+        f.value || ""
+      }" ${needVal ? "" : "disabled"} />
+      <button type="button" class="btn danger icon" data-del>×</button>
+    `;
+    $$("select, input", row).forEach((el) => {
+      const go = () => {
+        f[el.dataset.k] = el.value;
+        if (el.dataset.k === "table") {
+          f.column = SQL_SCHEMA.getTable(f.table)?.columns[0]?.name || "";
+        }
+        if (el.dataset.k === "table" || el.dataset.k === "op") renderFilters();
+        updateSql();
+      };
+      el.addEventListener("change", go);
+      el.addEventListener("input", go);
+    });
+    $("[data-del]", row).addEventListener("click", () => {
+      state.filters.splice(idx, 1);
+      renderFilters();
+      updateSql();
+    });
+    return row;
+  }
+  function updateSql() {
+    const result = SqlBuilder.build(state);
+    $("#sql-out").value = result.sql || result.errors.map((error) => `-- ПОМИЛКА: ${error}`).join("\n");
+    const status = $("#sql-status");
+    status.className = "sql-status" + (result.errors.length ? " error" : result.warnings.length ? " warning" : "");
+    status.innerHTML = result.errors.length
+      ? result.errors.map((error) => `<p><strong>Помилка:</strong> ${error}</p>`).join("")
+      : result.warnings.map((warning) => `<p><strong>Увага:</strong> ${warning}</p>`).join("");
+    $("#sql-explain").innerHTML = buildExplain(result);
+  }
+  function buildExplain(result) {
+    if (!state.tables.length) return "<p>Поки нічого не зібрано.</p>";
+    const lines = [];
+    lines.push(
+      `<li><b>Джерела:</b> ${state.tables.map(tLabel).join("; ")}</li>`
+    );
+    const resolvedEdges = result?.graph?.edges || [];
+    if (resolvedEdges.length) {
+      lines.push(
+        `<li><b>З’єднання:</b> ${resolvedEdges
+          .map(
+            (j) => `${tLabel(j.left)} ↔ ${tLabel(j.right)}: ${(j.conditions || []).map((condition) =>
+              `[${cLabel(j.left, condition.leftCol)}] = [${cLabel(j.right, condition.rightCol)}]`
+            ).join(" AND ")}`
+          )
+          .join("; ")}</li>`
+      );
+    }
+    if (state.fields.length) {
+      lines.push(
+        `<li><b>У результаті:</b> ${state.fields
+          .map((f) => {
+            const a = f.agg
+              ? SQL_SCHEMA.aggregates.find((x) => x.id === f.agg)?.label + " — "
+              : "";
+            return a + cLabel(f.table, f.column);
+          })
+          .join("; ")}</li>`
+      );
+    } else {
+      lines.push(`<li><b>У результаті:</b> усі поля</li>`);
+    }
+    if (state.metrics.length) {
+      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => SQL_SCHEMA.metrics.find((metric) => metric.id === id)?.label || id).join("; ")}</li>`);
+    }
+    if (state.orderBy.length) {
+      lines.push(`<li><b>Сортування:</b> ${state.orderBy.length} правил(а)</li>`);
+    }
+    if (state.filters.length) {
+      lines.push(
+        `<li><b>Фільтри:</b> ${state.filters
+          .map((f) => {
+            const op =
+              SQL_SCHEMA.operators.find((o) => o.id === f.op)?.label || f.op;
+            return `${cLabel(f.table, f.column)} ${op} ${f.value || "…"}`;
+          })
+          .join("; ")}</li>`
+      );
+    }
+    const modeLabel =
+      SQL_SCHEMA.outputModes.find((m) => m.id === state.mode)?.label ||
+      state.mode;
+    lines.push(`<li><b>Дія:</b> ${modeLabel}</li>`);
+    return `<ul>${lines.join("")}</ul>`;
+  }
+  function go(delta) {
+    if (delta > 0) {
+      if (state.step === 1 && !state.tables.length) {
+        notify("Оберіть хоча б одне джерело", false);
+        return;
+      }
+      if (state.step >= MAX_STEP) {
+        updateSql();
+        notify("SQL оновлено");
+        return;
+      }
+      state.step = Math.min(MAX_STEP, state.step + 1);
+    } else {
+      state.step = Math.max(1, state.step - 1);
+    }
+    onStepEnter();
+    syncSteps();
+  }
+  function onStepEnter() {
+    if (state.step === 2) {
+      renderJoins();
+      renderModeUi();
+    }
+    if (state.step === 3) {
+      renderFields();
+      renderOrder();
+    }
+    if (state.step === 4) renderFilters();
+    if (state.step === 5) updateSql();
+    if (state.step === 6) renderTemplates();
+  }
+  function goToStep(n) {
+    if (n > 1 && n < MAX_STEP && !state.tables.length) {
+      notify("Спочатку оберіть джерела", false);
+      return;
+    }
+    state.step = n;
+    onStepEnter();
+    syncSteps();
+  }
+  function resetAll() {
+    Object.assign(state, {
+      step: 1,
+      tables: [],
+      joins: [],
+      fields: [],
+      filters: [],
+      orderBy: [],
+      metrics: [],
+      presets: [],
+      latestPersonOnly: false,
+      parallel8: false,
+      mode: "select",
+      targetTable: "work_result",
+    });
+    renderCatalog();
+    renderSelectedStrip();
+    renderModeUi();
+    $("#preset-current-insurer").checked = false;
+    $("#filter-latest-person").checked = false;
+    $("#use-parallel-8").checked = false;
+    syncSteps();
+    updateSql();
+    notify("Очищено");
+  }
+  function renderTemplates() {
+    const root = $("#templates-list");
+    root.innerHTML = TEMPLATE_SCRIPTS.map(
+      (tpl, idx) => `
+        <article class="preset-card">
+          <strong>${tpl.title}</strong>
+          <span>${tpl.description}</span>
+          <div class="preset-actions">
+            <button type="button" class="btn" data-load="${idx}">Вставити</button>
+            <button type="button" class="btn ghost" data-copy="${idx}">Копіювати</button>
+          </div>
+        </article>`
+    ).join("");
+    root.querySelectorAll("[data-load]").forEach((btn) => {
+      btn.addEventListener("click", () => loadTemplate(Number(btn.dataset.load)));
+    });
+    root.querySelectorAll("[data-copy]").forEach((btn) => {
+      btn.addEventListener("click", () => copyTemplate(Number(btn.dataset.copy)));
+    });
+  }
+  function loadTemplate(index) {
+    const tpl = TEMPLATE_SCRIPTS[index];
+    if (!tpl) return;
+    const sql = applyTemplateSettings(tpl.sql);
+    $("#sql-out").value = sql;
+    $("#sql-explain").innerHTML = `<p>Завантажено шаблон: <strong>${tpl.title}</strong>.</p>`;
+    notify("Шаблон завантажено");
+  }
+  async function copyTemplate(index) {
+    const tpl = TEMPLATE_SCRIPTS[index];
+    if (!tpl) return;
+    const sql = applyTemplateSettings(tpl.sql);
+    try {
+      await navigator.clipboard.writeText(sql);
+      notify("Шаблон скопійовано");
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = sql;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      document.body.removeChild(area);
+      notify("Шаблон скопійовано");
+    }
+  }
+
+  function getTemplateSettings() {
+    return {
+      yearStart: Number($("#tpl-year-start").value) || 2022,
+      yearEnd: Number($("#tpl-year-end").value) || 2026,
+      monthStart: Number($("#tpl-month-start").value) || 1,
+      monthEnd: Number($("#tpl-month-end").value) || 6,
+      otk: $("#tpl-otk").value,
+    };
+  }
+
+  function applyTemplateSettings(sql) {
+    return TemplateUtils.apply(sql, getTemplateSettings());
+  }
+
+  function bind() {
+    $("#btn-next").addEventListener("click", () => go(1));
+    $("#btn-back").addEventListener("click", () => go(-1));
+    $$(".step-pill").forEach((el) =>
+      el.addEventListener("click", () => goToStep(Number(el.dataset.step)))
+    );
+    $("#mode-select").innerHTML = SQL_SCHEMA.outputModes
+      .map((m) => `<option value="${m.id}">${m.label}</option>`)
+      .join("");
+    $("#mode-select").addEventListener("change", (e) => {
+      state.mode = e.target.value;
+      renderModeUi();
+      updateSql();
+    });
+    $("#target-table").addEventListener("input", (e) => {
+      state.targetTable = e.target.value.trim() || "work_result";
+      updateSql();
+    });
+    $("#preset-current-insurer").addEventListener("change", (event) => {
+      state.presets = event.target.checked ? ["current_insurer_profile"] : [];
+      updateSql();
+    });
+    $("#filter-latest-person").addEventListener("change", (event) => {
+      state.latestPersonOnly = event.target.checked;
+      updateSql();
+    });
+    $("#use-parallel-8").addEventListener("change", (event) => {
+      state.parallel8 = event.target.checked;
+      updateSql();
+    });
+    $("#btn-add-order").addEventListener("click", () => {
+      if (state.fields.length) {
+        state.orderBy.push({ fieldIndex: 0, dir: "DESC" });
+      } else if (state.tables.length) {
+        notify("Спочатку додайте колонки у відповідь (кнопки зліва)", false);
+        return;
+      } else {
+        notify("Спочатку оберіть джерела", false);
+        return;
+      }
+      renderOrder();
+      updateSql();
+    });
+    $("#btn-copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText($("#sql-out").value);
+        notify("Скопійовано");
+      } catch {
+        $("#sql-out").select();
+        document.execCommand("copy");
+        notify("Скопійовано");
+      }
+    });
+    $("#btn-download").addEventListener("click", () => {
+      const blob = new Blob([$("#sql-out").value], {
+        type: "text/plain;charset=utf-8",
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "query.sql";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      notify("Збережено");
+    });
+    $("#btn-reset").addEventListener("click", resetAll);
+    $("#search-tables").addEventListener("input", (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      $$(".table-card").forEach((card) => {
+        card.style.display =
+          !q || card.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+      $$(".catalog-group").forEach((sec) => {
+        const any = [...sec.querySelectorAll(".table-card")].some(
+          (c) => c.style.display !== "none"
+        );
+        sec.style.display = any ? "" : "none";
+      });
+    });
+  }
+  function init() {
+    bind();
+    renderCatalog();
+    renderSelectedStrip();
+    renderModeUi();
+    syncSteps();
+    updateSql();
+  }
+  document.addEventListener("DOMContentLoaded", init);
+})();
+
+</script>
+  </body>
+</html>

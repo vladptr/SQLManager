@@ -589,6 +589,20 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     const root = $("#quick-filters");
     root.innerHTML = `<span class="muted">Швидко (з обраних полів):</span>`;
     const chips = [];
+    const categorySource = state.tables.includes("t6_2026_edrpou")
+      ? { table: "t6_2026_edrpou", column: "kat_zo" }
+      : state.tables.includes("sm_ape4_6data")
+        ? { table: "sm_ape4_6data", column: "aped46_zo" }
+        : null;
+    if (categorySource) {
+      const military = "31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74";
+      const disability = "2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80";
+      chips.push(
+        { id: "military", label: "Військові", ...categorySource, op: "IN", value: military },
+        { id: "civilian", label: "Цивільні", ...categorySource, op: "NOT IN", value: military },
+        { id: "disability", label: "Особи з інвалідністю", ...categorySource, op: "IN", value: disability }
+      );
+    }
     state.tables.forEach((tid) => {
       const t = SQL_SCHEMA.getTable(tid);
       (t?.columns || []).forEach((c) => {
@@ -624,7 +638,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
     const seen = new Set();
     chips.slice(0, 24).forEach((ch) => {
-      const key = `${ch.table}.${ch.column}.${ch.op}`;
+      const key = ch.id || `${ch.table}.${ch.column}.${ch.op}`;
       if (seen.has(key)) return;
       seen.add(key);
       if (seen.size > 8) return;

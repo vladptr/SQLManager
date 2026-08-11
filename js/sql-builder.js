@@ -1,5 +1,5 @@
 window.SqlBuilder = (function () {
-  const VALUE_OPS = new Set(["=", "!=", ">", ">=", "<", "<=", "LIKE", "LIKE_UPPER", "IN", "BETWEEN"]);
+  const VALUE_OPS = new Set(["=", "!=", ">", ">=", "<", "<=", "LIKE", "LIKE_UPPER", "IN", "NOT IN", "BETWEEN"]);
   const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_$#]*(\.[A-Za-z][A-Za-z0-9_$#]*)?$/;
 
   function table(id) { return SQL_SCHEMA.getTable(id); }
@@ -230,11 +230,11 @@ window.SqlBuilder = (function () {
         if (from && to) result.push(`${left} BETWEEN ${from} AND ${to}`);
         return;
       }
-      if (filter.op === "IN") {
+      if (filter.op === "IN" || filter.op === "NOT IN") {
         const parts = raw.split(",").map((item) => item.trim());
         if (!parts.length || parts.some((item) => !item)) { errors.push(`${label}: список містить порожнє значення.`); return; }
         const values = parts.map((item) => parseScalar(item, info?.type, errors, label));
-        if (values.every(Boolean)) result.push(`${left} IN (${values.join(", ")})`);
+        if (values.every(Boolean)) result.push(`${left} ${filter.op} (${values.join(", ")})`);
         return;
       }
       if (filter.op === "LIKE" || filter.op === "LIKE_UPPER") {

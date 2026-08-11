@@ -484,6 +484,7 @@ window.SQL_SCHEMA = {
     { id: "LIKE", label: "містить текст" },
     { id: "LIKE_UPPER", label: "містить текст (без регістру)" },
     { id: "IN", label: "одне зі списку (через кому)" },
+    { id: "NOT IN", label: "не входить до списку (через кому)" },
     { id: "IS NULL", label: "порожнє / відсутнє" },
     { id: "IS NOT NULL", label: "заповнене" },
     { id: "BETWEEN", label: "у діапазоні (від, до)" },

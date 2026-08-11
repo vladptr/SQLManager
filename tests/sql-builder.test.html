@@ -265,6 +265,22 @@
     includes(parallel.sql, "SELECT /*+ PARALLEL(8) */");
   });
 
+  test("готовий фільтр військових використовує точний список kat_zo", () => {
+    const value = "31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74";
+    const r = result(state(["t6_2026_edrpou"], { filters: [{ table: "t6_2026_edrpou", column: "kat_zo", op: "IN", value }] }));
+    includes(r.sql, "t6.kat_zo IN (31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74)");
+  });
+  test("готовий фільтр цивільних підтримує NOT IN для аналога APED46_ZO", () => {
+    const value = "31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74";
+    const r = result(state(["sm_ape4_6data"], { filters: [{ table: "sm_ape4_6data", column: "aped46_zo", op: "NOT IN", value }] }));
+    includes(r.sql, "pd.aped46_zo NOT IN (31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74)");
+  });
+  test("готовий фільтр осіб з інвалідністю використовує точний список категорій", () => {
+    const value = "2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80";
+    const r = result(state(["t6_2026_edrpou"], { filters: [{ table: "t6_2026_edrpou", column: "kat_zo", op: "IN", value }] }));
+    includes(r.sql, "t6.kat_zo IN (2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80)");
+  });
+
   const failed = results.filter(x => !x.ok);
   document.querySelector("#results").textContent = JSON.stringify({ passed: results.length - failed.length, failed: failed.length, results }, null, 2);
   document.title = failed.length ? `FAIL ${failed.length}` : `PASS ${results.length}`;
