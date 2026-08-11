@@ -984,12 +984,20 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
   }
   function init() {
-    bind();
-    renderCatalog();
-    renderSelectedStrip();
-    renderModeUi();
-    syncSteps();
-    updateSql();
+    try {
+      bind();
+      renderCatalog();
+      renderSelectedStrip();
+      renderModeUi();
+      syncSteps();
+      updateSql();
+    } catch (error) {
+      const catalog = document.querySelector("#table-catalog");
+      if (catalog) {
+        catalog.innerHTML = `<p class="error-message"><strong>Помилка запуску конструктора:</strong> ${String(error && error.message ? error.message : error)}</p>`;
+      }
+      throw error;
+    }
   }
   document.addEventListener("DOMContentLoaded", init);
 })();

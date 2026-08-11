@@ -1186,6 +1186,16 @@ footer-note code,
     <div class="toast" id="toast" role="status"></div>
 
     <script>
+      window.addEventListener("error", function (event) {
+        var catalog = document.getElementById("table-catalog");
+        if (!catalog) return;
+        catalog.innerHTML =
+          '<p class="error-message"><strong>Помилка запуску конструктора:</strong> ' +
+          String(event.message || "невідома помилка JavaScript") +
+          " (рядок " + String(event.lineno || "?") + ")</p>";
+      });
+    </script>
+    <script>
 window.SQL_SCHEMA = {
   schemas: {
     work: "Робочі / підготовлені набори",
@@ -3117,12 +3127,20 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
   }
   function init() {
-    bind();
-    renderCatalog();
-    renderSelectedStrip();
-    renderModeUi();
-    syncSteps();
-    updateSql();
+    try {
+      bind();
+      renderCatalog();
+      renderSelectedStrip();
+      renderModeUi();
+      syncSteps();
+      updateSql();
+    } catch (error) {
+      const catalog = document.querySelector("#table-catalog");
+      if (catalog) {
+        catalog.innerHTML = `<p class="error-message"><strong>Помилка запуску конструктора:</strong> ${String(error && error.message ? error.message : error)}</p>`;
+      }
+      throw error;
+    }
   }
   document.addEventListener("DOMContentLoaded", init);
 })();

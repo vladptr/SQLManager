@@ -239,6 +239,16 @@
 
     <div class="toast" id="toast" role="status"></div>
 
+    <script>
+      window.addEventListener("error", function (event) {
+        var catalog = document.getElementById("table-catalog");
+        if (!catalog) return;
+        catalog.innerHTML =
+          '<p class="error-message"><strong>Помилка запуску конструктора:</strong> ' +
+          String(event.message || "невідома помилка JavaScript") +
+          " (рядок " + String(event.lineno || "?") + ")</p>";
+      });
+    </script>
     <script src="data/schema.js"></script>
     <script src="js/sql-builder.js"></script>
     <script src="js/template-utils.js"></script>

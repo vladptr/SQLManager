@@ -19,5 +19,6 @@ if ($html -match '<script src=' -or $html -match '<link rel="stylesheet"') {
   throw "Не всі зовнішні ресурси вдалося вбудувати у переносний HTML."
 }
 
-[IO.File]::WriteAllText($outputPath, $html, [Text.UTF8Encoding]::new($false))
+$utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+[IO.File]::WriteAllText($outputPath, $html, $utf8WithoutBom)
 Write-Host "Створено: $outputPath"
