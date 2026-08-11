@@ -175,6 +175,96 @@
     if (explicit.sql.includes("ikis_ersp.pinsur_chng_doc")) throw new Error("Явний маршрут усіх версій не повинен додавати документ змін");
   });
 
+  test("людина та підприємство зв’язуються через кадрові події APE 4-5 і пакет", () => {
+    const fields = [
+      { table: "insured_person_info", column: "numident" },
+      { table: "sm_ape4_5data", column: "aped45_date_hire" },
+      { table: "sm_ape4_5data", column: "aped45_date_fire" },
+      { table: "sm_ape4_5data", column: "aped45_position" },
+      { table: "pinsur_main", column: "im_id" }
+    ];
+    const r = result(state(["insured_person_info", "sm_ape4_5data", "pinsur_main"], { fields }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "ipi.numident = d5.aped45_numident");
+    includes(r.sql, "d5.aped45_slb = plb.slb_id");
+    includes(r.sql, "plb.slb_im = im.im_id");
+    includes(r.sql, "d5.aped45_date_hire");
+    includes(r.sql, "d5.aped45_date_fire");
+    includes(r.sql, "d5.aped45_position");
+    if (r.sql.includes("t6_2026_edrpou")) throw new Error("Для явно вибраного APE 4-5 не потрібна bridge-таблиця T6");
+    if (!r.warnings.some((warning) => /кадрових подій/.test(warning))) throw new Error("Немає попередження про множинні кадрові події");
+  });
+  test("маршрут людина–APE 4-5–підприємство не залежить від порядку вибору", () => {
+    const a = result(state(["insured_person_info", "sm_ape4_5data", "pinsur_main"]));
+    const b = result(state(["pinsur_main", "sm_ape4_5data", "insured_person_info"]));
+    equal(a.sql, b.sql);
+  });
+
+  test("за замовчуванням приєднуються всі картки особи без latest CTE", () => {
+    const r = result(state(["t6_2026_edrpou", "insured_person_info"]));
+    includes(r.sql, "ikis_person.insured_person_info ipi");
+    if (r.sql.includes("latest_person_info") || r.sql.includes("sqlm_rn = 1")) throw new Error("Неявно застосовано лише останню картку");
+  });
+  test("фільтр останньої картки явно додає ROW_NUMBER для T6", () => {
+    const r = result(state(["t6_2026_edrpou", "insured_person_info"], { latestPersonOnly: true }));
+    includes(r.sql, "latest_person_info AS");
+    includes(r.sql, "ROW_NUMBER() OVER (PARTITION BY numident ORDER BY modify_dt DESC NULLS LAST, ip_id DESC)");
+    includes(r.sql, "WHERE sqlm_rn = 1");
+  });
+  test("фільтр останньої картки однаково працює для APE 4-5", () => {
+    const all = result(state(["insured_person_info", "sm_ape4_5data"]));
+    if (all.sql.includes("latest_person_info")) throw new Error("APE 4-5 не має дедуплікувати картки за замовчуванням");
+    const latest = result(state(["insured_person_info", "sm_ape4_5data"], { latestPersonOnly: true }));
+    includes(latest.sql, "latest_person_info AS");
+    includes(latest.sql, "FROM latest_person_info ipi");
+  });
+
+  test("робоча T6 приєднується до APE 4-5 без insured_person_info", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"]));
+    includes(r.sql, "ape45_employment_with_period AS");
+    includes(r.sql, "t6.slb_im = d5.sqlm_slb_im");
+    includes(r.sql, "t6.kod_zo = d5.aped45_numident");
+    if (r.sql.includes("t6.year = d5.sqlm_year") || r.sql.includes("t6.aped46_mnth = d5.sqlm_month")) throw new Error("Стандартний маршрут має повертати всі посади, а не лише посади за місяць T6");
+    if (r.sql.includes("insured_person_info") || r.sql.includes("latest_person_info")) throw new Error("Зайва картка особи у маршруті T6 → APE 4-5");
+  });
+  test("для T6 → APE 4-5 можна явно обмежити посади тим самим місяцем", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "positions_in_same_month" }]
+    }));
+    includes(r.sql, "t6.year = d5.sqlm_year");
+    includes(r.sql, "t6.aped46_mnth = d5.sqlm_month");
+  });
+  test("фільтр останньої картки не додає людину до T6 → APE 4-5", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], { latestPersonOnly: true }));
+    if (r.sql.includes("insured_person_info") || r.sql.includes("latest_person_info")) throw new Error("Фільтр не повинен додавати невибрану таблицю особи");
+  });
+
+  test("можна вибрати останню відому посаду людини у страхувальника", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "latest_position_at_insurer" }]
+    }));
+    includes(r.sql, "ape45_latest_position_by_insurer AS");
+    includes(r.sql, "PARTITION BY plb_src.slb_im, d5_src.aped45_numident");
+    includes(r.sql, "ORDER BY d5_src.aped45_date_hire DESC NULLS LAST");
+    includes(r.sql, "WHERE sqlm_position_rn = 1");
+  });
+  test("можна вибрати останню посаду станом на місяць T6", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "position_as_of_t6_month" }]
+    }));
+    includes(r.sql, "ape45_position_as_of_t6_month AS");
+    includes(r.sql, "<= (t6_src.year * 100 + t6_src.aped46_mnth)");
+    includes(r.sql, "d5_src.aped45_date_hire <= LAST_DAY");
+    includes(r.sql, "t6.kat_zo = d5.sqlm_t6_kat_zo");
+    includes(r.sql, "WHERE sqlm_position_rn = 1");
+  });
+  test("Oracle hint PARALLEL(8) додається лише за галочкою", () => {
+    const normal = result(state(["t6_2026_edrpou"]));
+    if (normal.sql.includes("PARALLEL(8)")) throw new Error("Hint додано без галочки");
+    const parallel = result(state(["t6_2026_edrpou"], { parallel8: true }));
+    includes(parallel.sql, "SELECT /*+ PARALLEL(8) */");
+  });
+
   const failed = results.filter(x => !x.ok);
   document.querySelector("#results").textContent = JSON.stringify({ passed: results.length - failed.length, failed: failed.length, results }, null, 2);
   document.title = failed.length ? `FAIL ${failed.length}` : `PASS ${results.length}`;

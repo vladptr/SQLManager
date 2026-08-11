@@ -8,6 +8,8 @@
     orderBy: [],
     metrics: [],
     presets: [],
+    latestPersonOnly: false,
+    parallel8: false,
     mode: "select",
     targetTable: "work_result",
   };
@@ -813,6 +815,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       orderBy: [],
       metrics: [],
       presets: [],
+      latestPersonOnly: false,
+      parallel8: false,
       mode: "select",
       targetTable: "work_result",
     });
@@ -820,6 +824,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     renderSelectedStrip();
     renderModeUi();
     $("#preset-current-insurer").checked = false;
+    $("#filter-latest-person").checked = false;
+    $("#use-parallel-8").checked = false;
     syncSteps();
     updateSql();
     notify("Очищено");
@@ -904,6 +910,14 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
     $("#preset-current-insurer").addEventListener("change", (event) => {
       state.presets = event.target.checked ? ["current_insurer_profile"] : [];
+      updateSql();
+    });
+    $("#filter-latest-person").addEventListener("change", (event) => {
+      state.latestPersonOnly = event.target.checked;
+      updateSql();
+    });
+    $("#use-parallel-8").addEventListener("change", (event) => {
+      state.parallel8 = event.target.checked;
       updateSql();
     });
     $("#btn-add-order").addEventListener("click", () => {

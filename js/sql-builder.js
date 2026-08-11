@@ -37,7 +37,10 @@ window.SqlBuilder = (function () {
     const overrides = new Map((state.joins || []).filter((edge) => edge.id).map((edge) => [edge.id, edge]));
     return catalog.map((catalogEdge) => {
         const edge = { ...catalogEdge, ...(overrides.get(catalogEdge.id) || {}) };
-        const variant = edge.variants?.find((item) => item.id === edge.selectedVariant) || edge.variants?.[0];
+        const latestVariant = state.latestPersonOnly && !edge.selectedVariant
+          ? edge.variants?.find((item) => item.isLatest)
+          : null;
+        const variant = edge.variants?.find((item) => item.id === edge.selectedVariant) || latestVariant || edge.variants?.[0];
         return {
         id: edge.id,
         left: edge.left || edge.leftTable,
@@ -49,10 +52,12 @@ window.SqlBuilder = (function () {
         leftSource: variant?.leftSource || edge.leftSource,
         rightSource: variant?.rightSource || edge.rightSource,
         note: edge.note || "",
+        warning: edge.warning || "",
+        endpointsOnly: edge.endpointsOnly === true,
         isDefault: edge.isDefault !== false,
         weight: Number(edge.weight) || (edge.isDefault === false ? 20 : 5),
         variants: edge.variants || [],
-        selectedVariant: edge.selectedVariant || edge.variants?.[0]?.id || "",
+        selectedVariant: variant?.id || "",
         };
       });
   }
@@ -92,7 +97,7 @@ window.SqlBuilder = (function () {
   function resolveJoinGraph(selectedTableIds, joinCatalog, overrides) {
     const userTables = unique(selectedTableIds.filter((id) => table(id))).sort();
     const state = { joins: overrides || [] };
-    const edges = joinCatalog
+    const catalogEdges = joinCatalog
       ? (joinCatalog.every((edge) => typeof edge.weight === "number" && typeof edge.isDefault === "boolean")
         ? joinCatalog
         : normalizedEdges(state, joinCatalog))
@@ -100,6 +105,7 @@ window.SqlBuilder = (function () {
     const errors = [];
     const warnings = [];
     if (!userTables.length) return { root: null, userTables, bridgeTables: [], allTables: [], edges: [], errors: ["Оберіть хоча б одне джерело."], warnings };
+    const edges = catalogEdges.filter((edge) => !edge.endpointsOnly || (userTables.includes(edge.left) && userTables.includes(edge.right)));
     const root = chooseRoot(userTables, edges);
     const connected = new Set([root]);
     const resolved = new Map();
@@ -161,7 +167,14 @@ window.SqlBuilder = (function () {
       if (orientedCardinality.endsWith(":N") || orientedCardinality === "N:M") {
         warnings.push(`Зв’язок ${table(parent)?.label} → ${table(child)?.label} має кардинальність ${orientedCardinality} і може розмножити рядки.`);
       }
+      if (edge.warning) warnings.push(edge.warning);
       visited.add(child);
+    }
+    for (const join of joins) {
+      const edge = join.edge;
+      const rootSourceKey = edge.left === root ? edge.leftSource : edge.right === root ? edge.rightSource : null;
+      const rootSource = rootSourceKey ? SQL_SCHEMA.sources?.[rootSourceKey] : null;
+      if (rootSource?.cte && !ctes.includes(rootSource.cte)) ctes.push(rootSource.cte);
     }
     const hasManyChain = joins.filter((join) => /:N$/.test(join.edge.cardinality)).length >= 2;
     if (hasManyChain) warnings.push("У страхувальника може бути декілька документів змін та декілька записів КВЕД. Суми T6 можуть розмножитися.");
@@ -293,7 +306,8 @@ window.SqlBuilder = (function () {
     plan.joins.forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
     const groupBy = fields.filter((item) => !item.agg).map((item) => fieldExpression(item, aliases, false, ctas));
     const hasAggregate = metrics.length || fields.some((item) => item.agg);
-    let sql = `SELECT\n       ${selectItems.join(",\n       ")}\n${from}`;
+    const selectKeyword = state.parallel8 ? "SELECT /*+ PARALLEL(8) */" : "SELECT";
+    let sql = `${selectKeyword}\n       ${selectItems.join(",\n       ")}\n${from}`;
     if (where.length) sql += `\n WHERE ${unique(where).join("\n   AND ")}`;
     if (hasAggregate && groupBy.length) sql += `\n GROUP BY\n       ${unique(groupBy).join(",\n       ")}`;
     const order = (state.orderBy || []).map((item) => {
