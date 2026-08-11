@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Конструктор SQL</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="brand">
+          <h1>Конструктор SQL</h1>
+          <p>
+            Зібрати будь-який запит вибором: джерела → поєднання → що
+            показати → фільтри. Без написання SQL вручну.
+          </p>
+        </div>
+        <nav class="steps" id="wizard-steps" aria-label="Кроки">
+          <button type="button" class="step-pill active" data-step="1">1. Джерела</button>
+          <button type="button" class="step-pill" data-step="2">2. Поєднання</button>
+          <button type="button" class="step-pill" data-step="3">3. Результат</button>
+          <button type="button" class="step-pill" data-step="4">4. Фільтри</button>
+          <button type="button" class="step-pill" data-step="5">5. SQL</button>
+        </nav>
+      </header>
+
+      <div class="layout with-sql">
+        <main class="panel-card">
+          
+          <section class="panel active" data-step="1">
+            <h2>Звідки брати дані?</h2>
+            <p class="sub">
+              Додайте один або кілька джерел. Назви — звичайною мовою.
+              (Технічні імена таблиць БД лише дрібним текстом — для вас вони не
+              обов’язкові.)
+            </p>
+            <div class="toolbar">
+              <input
+                id="search-tables"
+                type="search"
+                placeholder="Пошук по назві або опису…"
+                style="max-width: 420px"
+              />
+              <span class="badge">Обрано: <span id="selected-count">0</span></span>
+            </div>
+            <div class="selected-strip" id="selected-strip"></div>
+            <div id="table-catalog"></div>
+            <p class="footer-note">
+              Немає потрібного джерела в списку? Його можна додати в
+              <code>data/schema.js</code> (поки немає підключення до БД —
+              каталог редагується вручну).
+            </p>
+          </section>
+
+          
+          <section class="panel" data-step="2">
+            <h2>Як працюємо з даними?</h2>
+            <p class="sub">
+              Якщо джерел кілька — вкажіть, як їх з’єднати (які поля «одне й те
+              саме»). Оберіть також, що зробити з результатом.
+            </p>
+
+            <div class="block">
+              <h3 class="block-title">Що зробити з результатом</h3>
+              <div class="mode-row">
+                <label>
+                  Дія
+                  <select id="mode-select"></select>
+                </label>
+                <label id="target-wrap">
+                  Назва нової таблиці / об’єкта
+                  <input id="target-table" type="text" value="work_result" />
+                </label>
+              </div>
+            </div>
+
+            <div class="block" id="joins-block">
+              <h3 class="block-title">З’єднання джерел</h3>
+              <p class="hint" id="joins-hint"></p>
+              <div id="joins-list"></div>
+            </div>
+          </section>
+
+          
+          <section class="panel" data-step="3">
+            <h2>Що має бути в таблиці-відповіді?</h2>
+            <p class="sub how-to">
+              <b>1.</b> Зліва натисніть поле — воно з’явиться справа.<br />
+              <b>2.</b> Справа оберіть, <em>що з ним зробити</em> (просто показати /
+              порахувати суму / середнє / кількість…).<br />
+              <b>3.</b> За потреби знизу вкажіть, <em>в якому порядку</em> показувати
+              рядки.
+            </p>
+
+            <div class="result-builder" id="result-builder">
+              <div class="result-col result-available">
+                <h3 class="col-head">Доступні поля</h3>
+                <p class="col-sub">Натисніть, щоб додати у відповідь →</p>
+                <div id="fields-available"></div>
+              </div>
+              <div class="result-col result-chosen">
+                <h3 class="col-head">
+                  Колонки у відповіді
+                  <span class="badge" id="chosen-count">0</span>
+                </h3>
+                <p class="col-sub">Так виглядатимуть колонки в результаті</p>
+                <div id="fields-chosen"></div>
+                <p class="hint" id="fields-empty-hint">
+                  Поки порожньо — буде показано <b>усі</b> поля (SELECT *).
+                  Краще додати лише потрібні.
+                </p>
+              </div>
+            </div>
+
+            <div class="section-split"></div>
+
+            <div class="sort-block">
+              <h3 class="block-title">Порядок рядків (необов’язково)</h3>
+              <p class="hint">
+                Якщо не додавати — порядок буде як у базі. Якщо додати —
+                наприклад «від більшого значення до меншого».
+              </p>
+              <div id="order-list"></div>
+              <button type="button" class="btn ghost" id="btn-add-order">
+                + Додати сортування
+              </button>
+            </div>
+          </section>
+
+          
+          <section class="panel" data-step="4">
+            <h2>Які рядки залишити?</h2>
+            <p class="sub">
+              Обмеження вибірки: конкретний код, період, «поле містить…», «не
+              порожнє» тощо. Без умов — потраплять усі рядки, що підходять за
+              з’єднаннями.
+            </p>
+            <div id="filters-list"></div>
+            <div class="quick-filters" id="quick-filters"></div>
+          </section>
+
+          
+          <section class="panel" data-step="5">
+            <h2>Перегляд і копіювання</h2>
+            <p class="sub">Що саме зібрано (людською мовою):</p>
+            <div id="sql-explain" class="explain-box"></div>
+            <p class="footer-note">
+              Скопіюйте SQL справа і виконайте на сервері (PL/SQL Developer /
+              SQL*Plus). Ця програма базу не підключає — лише будує текст запиту.
+            </p>
+          </section>
+
+          <div class="nav">
+            <button type="button" class="btn secondary" id="btn-back" disabled>
+              Назад
+            </button>
+            <button type="button" class="btn" id="btn-next">Далі</button>
+          </div>
+        </main>
+
+        <aside class="sql-card">
+          <h2>SQL</h2>
+          <p class="muted" style="margin: 0; font-size: 0.9rem">
+            Оновлюється під час вибору на будь-якому кроці.
+          </p>
+          <div class="sql-actions">
+            <button type="button" class="btn" id="btn-copy">Копіювати</button>
+            <button type="button" class="btn ghost" id="btn-download">
+              Зберегти .sql
+            </button>
+            <button type="button" class="btn secondary" id="btn-reset">
+              Почати спочатку
+            </button>
+          </div>
+          <textarea id="sql-out" readonly spellcheck="false"></textarea>
+        </aside>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script src="data/schema.js"></script>
+    <script src="js/sql-builder.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
