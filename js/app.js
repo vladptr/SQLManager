@@ -14,7 +14,7 @@
   const TEMPLATE_SCRIPTS = [
     {
       id: "t6_2026_edrpou",
-      title: "Створити t6_2026_edrpou",
+      title: "t6_edrpou",
       description:
         "Скрипт для створення таблиці t6_2026_edrpou з пакета T6 за 2026 рік.",
       sql: `drop table t6_2026_edrpou purge;
@@ -67,6 +67,69 @@ group by lpad(mrd.mrd_reg_code, 2,0),
 
 `,
       },
+    {
+      id: "t1_2024",
+      title: "t1",
+      description:
+        "КВЕД і ознака бюджетної організації зі звітності APE 4-1 за 2022–2025 роки.",
+      sql: `DROP TABLE t1_2024;
+
+CREATE TABLE t1_2024 AS
+SELECT /*+ PARALLEL(plb, 8) */
+       plb.slb_im,
+       plb.slb_charg_mnth,
+       plb.slb_charg_year,
+       SUBSTR(app4.ape1_eco_act, 1, 5) AS kved,
+       MAX(app4.ape1_budg_org) AS ape1_budg_org
+FROM ikis_websm.sm_packlabel plb
+JOIN ikis_websm.sm_ape4_1 app4
+  ON app4.ape1_slb = plb.slb_id
+WHERE plb.slb_charg_year BETWEEN 2022 AND 2025
+  AND plb.slb_charg_mnth BETWEEN {{MONTH_START}} AND {{MONTH_END}}
+  AND plb.slb_system = 1
+  AND plb.slb_actuality = 'Y'
+  AND plb.slb_fixed = 'Y'
+  AND plb.slb_st = 'O'
+  AND app4.ape1_st = 'O'
+GROUP BY plb.slb_im,
+         plb.slb_charg_mnth,
+         plb.slb_charg_year,
+         SUBSTR(app4.ape1_eco_act, 1, 5);
+
+SELECT *
+FROM t1_2024;
+`,
+    },
+    {
+      id: "t2_2022",
+      title: "t2",
+      description:
+        "Зведення категорій ЗО, утримань і внесків із SK_APEQ_DODATOK2_DATA за 2024 рік.",
+      sql: `CREATE TABLE t2_2022 AS
+SELECT /*+ PARALLEL(t, 8) */
+       TO_CHAR(LPAD(spl.spl_ru, 2, 0)) AS reg,
+       t.apqd2_zo AS cat_zo,
+       t.apqd2_numident AS numid,
+       t.apqd2_mnth AS mnth,
+       SUM(t.apqd2_sum_pv) AS sum_vrah,
+       SUM(t.apqd2_sum_v) AS sum_vnes,
+       spl.spl_im
+FROM ikis_websm.sk_apeq_dodatok2_data t
+JOIN ikis_websm.sk_packlabel spl
+  ON spl.spl_id = t.apqd2_spl
+JOIN ikis_websm.sk_packlabel_extended sple
+  ON sple.sple_id = spl.spl_id
+WHERE t.apqd2_year = 2024
+  AND t.apqd2_mnth BETWEEN 1 AND 12
+  AND t.apqd2_st = 'O'
+  AND spl.spl_actuality = 'Y'
+GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
+         t.apqd2_zo,
+         t.apqd2_numident,
+         t.apqd2_mnth,
+         spl.spl_im;
+`,
+    },
   ];
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
