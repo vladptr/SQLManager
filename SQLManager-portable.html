@@ -1758,7 +1758,7 @@ window.SqlBuilder = (function () {
   const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_$#]*(\.[A-Za-z][A-Za-z0-9_$#]*)?$/;
 
   function table(id) { return SQL_SCHEMA.getTable(id); }
-  function column(tableId, name) { return table(tableId)?.columns.find((item) => item.name === name); }
+  function column(tableId, name) { const item = table(tableId); return item && item.columns.find((columnItem) => columnItem.name === name); }
   function col(alias, name) { return `${alias}.${name}`; }
   function escapeLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
   function unique(values) { return [...new Set(values)]; }
@@ -1767,7 +1767,7 @@ window.SqlBuilder = (function () {
   }
   function columnExpression(tableId, name, aliases) {
     const info = column(tableId, name);
-    if (info?.semanticExpression && (info.requires || []).every((id) => aliases[id])) {
+    if (info && info.semanticExpression && (info.requires || []).every((id) => aliases[id])) {
       return replaceAliases(info.semanticExpression, aliases);
     }
     return col(aliases[tableId], name);
@@ -1793,26 +1793,26 @@ window.SqlBuilder = (function () {
     return catalog.map((catalogEdge) => {
         const edge = { ...catalogEdge, ...(overrides.get(catalogEdge.id) || {}) };
         const latestVariant = state.latestPersonOnly && !edge.selectedVariant
-          ? edge.variants?.find((item) => item.isLatest)
+          ? (edge.variants || []).find((item) => item.isLatest)
           : null;
-        const variant = edge.variants?.find((item) => item.id === edge.selectedVariant) || latestVariant || edge.variants?.[0];
+        const variant = (edge.variants || []).find((item) => item.id === edge.selectedVariant) || latestVariant || (edge.variants || [])[0];
         return {
         id: edge.id,
         left: edge.left || edge.leftTable,
         right: edge.right || edge.rightTable,
-        conditions: variant?.conditions || edge.conditions || (edge.leftCol && edge.rightCol ? [{ leftCol: edge.leftCol, rightCol: edge.rightCol }] : []),
+        conditions: (variant && variant.conditions) || edge.conditions || (edge.leftCol && edge.rightCol ? [{ leftCol: edge.leftCol, rightCol: edge.rightCol }] : []),
         type: edge.type || "INNER",
         cardinality: edge.cardinality || "N:M",
         preferredRoot: edge.preferredRoot,
-        leftSource: variant?.leftSource || edge.leftSource,
-        rightSource: variant?.rightSource || edge.rightSource,
+        leftSource: (variant && variant.leftSource) || edge.leftSource,
+        rightSource: (variant && variant.rightSource) || edge.rightSource,
         note: edge.note || "",
         warning: edge.warning || "",
         endpointsOnly: edge.endpointsOnly === true,
         isDefault: edge.isDefault !== false,
         weight: Number(edge.weight) || (edge.isDefault === false ? 20 : 5),
         variants: edge.variants || [],
-        selectedVariant: variant?.id || "",
+        selectedVariant: (variant && variant.id) || "",
         };
       });
   }
@@ -1820,7 +1820,7 @@ window.SqlBuilder = (function () {
   function chooseRoot(selected, edges) {
     const preferred = edges.map((edge) => edge.preferredRoot).filter((id) => selected.includes(id)).sort();
     if (preferred.length) return preferred[0];
-    return [...selected].sort((a, b) => (table(a)?.fullName || a).localeCompare(table(b)?.fullName || b))[0];
+    return [...selected].sort((a, b) => (((table(a) || {}).fullName || a).localeCompare((table(b) || {}).fullName || b)))[0];
   }
 
   function shortestPath(startSet, target, edges) {
@@ -1830,14 +1830,14 @@ window.SqlBuilder = (function () {
     while (queue.length) {
       queue.sort((a, b) => a.cost - b.cost || a.signature.localeCompare(b.signature));
       const current = queue.shift();
-      if (current.cost > (best.get(current.node) ?? Infinity)) continue;
+      if (current.cost > (best.has(current.node) ? best.get(current.node) : Infinity)) continue;
       best.set(current.node, current.cost);
       if (current.node === target) { solutions.push(current); continue; }
       edges.filter((edge) => edge.isDefault && (edge.left === current.node || edge.right === current.node)).forEach((edge) => {
         const next = edge.left === current.node ? edge.right : edge.left;
         if (current.path.some((item) => item.edge.id === edge.id)) return;
         const cost = current.cost + edge.weight;
-        if (cost > (best.get(next) ?? Infinity)) return;
+        if (cost > (best.has(next) ? best.get(next) : Infinity)) return;
         const step = { edge, from: current.node, to: next };
         queue.push({ node: next, cost, path: [...current.path, step], signature: `${current.signature}|${edge.id}` });
       });
@@ -1867,8 +1867,8 @@ window.SqlBuilder = (function () {
     userTables.filter((id) => id !== root).sort().forEach((target) => {
       if (connected.has(target)) return;
       const found = shortestPath(connected, target, edges);
-      if (!found.path) { errors.push(`Неможливо знайти шлях до джерела «${table(target)?.label || target}».`); return; }
-      if (found.ambiguous) { errors.push(`Для джерела «${table(target)?.label || target}» існує кілька рівноцінних маршрутів. Виберіть семантичний маршрут.`); return; }
+      if (!found.path) { errors.push(`Неможливо знайти шлях до джерела «${(table(target) || {}).label || target}».`); return; }
+      if (found.ambiguous) { errors.push(`Для джерела «${(table(target) || {}).label || target}» існує кілька рівноцінних маршрутів. Виберіть семантичний маршрут.`); return; }
       found.path.forEach((step) => { resolved.set(step.edge.id, step.edge); connected.add(step.from); connected.add(step.to); });
     });
     const allTables = [...connected].sort();
@@ -1897,7 +1897,7 @@ window.SqlBuilder = (function () {
         });
       const edge = candidates[0];
       if (!edge) {
-        const missing = graph.allTables.filter((id) => !visited.has(id)).map((id) => table(id)?.label || id);
+        const missing = graph.allTables.filter((id) => !visited.has(id)).map((id) => (table(id) || {}).label || id);
         errors.push(`Неможливо зв’язати всі вибрані джерела. Без шляху залишилися: ${missing.join(", ")}. Додайте зв’язок у розширеному режимі або приберіть ці таблиці.`);
         return { errors, warnings, ctes, root, joins: [] };
       }
@@ -1909,18 +1909,18 @@ window.SqlBuilder = (function () {
         return { errors, warnings, ctes, root, joins: [] };
       }
       const sourceKey = forward ? edge.rightSource : edge.leftSource;
-      const source = sourceKey ? SQL_SCHEMA.sources?.[sourceKey] : null;
-      if (source?.cte && !ctes.includes(source.cte)) ctes.push(source.cte);
+      const source = sourceKey && SQL_SCHEMA.sources ? SQL_SCHEMA.sources[sourceKey] : null;
+      if (source && source.cte && !ctes.includes(source.cte)) ctes.push(source.cte);
       const joinType = forward ? edge.type : ({ LEFT: "RIGHT", RIGHT: "LEFT" }[edge.type] || edge.type);
       const conditions = edge.conditions.map((condition) => forward
         ? `${col(aliases[parent], condition.leftCol)} = ${col(aliases[child], condition.rightCol)}`
         : `${col(aliases[parent], condition.rightCol)} = ${col(aliases[child], condition.leftCol)}`);
-      joins.push({ table: child, sourceName: source?.from || table(child).fullName, alias: aliases[child], type: joinType, conditions, edge, forward });
+      joins.push({ table: child, sourceName: (source && source.from) || table(child).fullName, alias: aliases[child], type: joinType, conditions, edge, forward });
       const orientedCardinality = forward || edge.cardinality === "N:M"
         ? edge.cardinality
         : edge.cardinality.split("").reverse().join("");
       if (orientedCardinality.endsWith(":N") || orientedCardinality === "N:M") {
-        warnings.push(`Зв’язок ${table(parent)?.label} → ${table(child)?.label} має кардинальність ${orientedCardinality} і може розмножити рядки.`);
+        warnings.push(`Зв’язок ${(table(parent) || {}).label} → ${(table(child) || {}).label} має кардинальність ${orientedCardinality} і може розмножити рядки.`);
       }
       if (edge.warning) warnings.push(edge.warning);
       visited.add(child);
@@ -1928,8 +1928,8 @@ window.SqlBuilder = (function () {
     for (const join of joins) {
       const edge = join.edge;
       const rootSourceKey = edge.left === root ? edge.leftSource : edge.right === root ? edge.rightSource : null;
-      const rootSource = rootSourceKey ? SQL_SCHEMA.sources?.[rootSourceKey] : null;
-      if (rootSource?.cte && !ctes.includes(rootSource.cte)) ctes.push(rootSource.cte);
+      const rootSource = rootSourceKey && SQL_SCHEMA.sources ? SQL_SCHEMA.sources[rootSourceKey] : null;
+      if (rootSource && rootSource.cte && !ctes.includes(rootSource.cte)) ctes.push(rootSource.cte);
     }
     const hasManyChain = joins.filter((join) => /:N$/.test(join.edge.cardinality)).length >= 2;
     if (hasManyChain) warnings.push("У страхувальника може бути декілька документів змін та декілька записів КВЕД. Суми T6 можуть розмножитися.");
@@ -1939,14 +1939,14 @@ window.SqlBuilder = (function () {
   function sourceForRoot(root, joins) {
     for (const join of joins) {
       const edge = join.edge;
-      if (edge.left === root && edge.leftSource) return SQL_SCHEMA.sources?.[edge.leftSource]?.from;
-      if (edge.right === root && edge.rightSource) return SQL_SCHEMA.sources?.[edge.rightSource]?.from;
+      if (edge.left === root && edge.leftSource) return SQL_SCHEMA.sources && SQL_SCHEMA.sources[edge.leftSource] && SQL_SCHEMA.sources[edge.leftSource].from;
+      if (edge.right === root && edge.rightSource) return SQL_SCHEMA.sources && SQL_SCHEMA.sources[edge.rightSource] && SQL_SCHEMA.sources[edge.rightSource].from;
     }
     return null;
   }
 
   function parseScalar(value, type, errors, label) {
-    const raw = String(value ?? "").trim();
+    const raw = String(value == null ? "" : value).trim();
     if (!raw) { errors.push(`${label}: введіть значення.`); return null; }
     if (type === "NUMBER") {
       if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) { errors.push(`${label}: очікується число з крапкою як десятковим роздільником.`); return null; }
@@ -1971,34 +1971,34 @@ window.SqlBuilder = (function () {
       const alias = aliases[filter.table];
       if (!alias) return;
       const info = column(filter.table, filter.column);
-      const label = `Фільтр ${index + 1} (${info?.label || filter.column})`;
+      const label = `Фільтр ${index + 1} (${(info && info.label) || filter.column})`;
       const left = columnExpression(filter.table, filter.column, aliases);
       if (filter.op === "IS NULL" || filter.op === "IS NOT NULL") { result.push(`${left} ${filter.op}`); return; }
       if (!VALUE_OPS.has(filter.op)) { errors.push(`${label}: невідомий оператор.`); return; }
-      const raw = String(filter.value ?? "").trim();
+      const raw = String(filter.value == null ? "" : filter.value).trim();
       if (!raw) { errors.push(`${label}: порожнє значення не допускається; використайте «порожнє / відсутнє».`); return; }
       if (filter.op === "BETWEEN") {
         const parts = raw.split(",").map((item) => item.trim());
         if (parts.length !== 2 || parts.some((item) => !item)) { errors.push(`${label}: для діапазону введіть рівно два значення через кому.`); return; }
-        const from = parseScalar(parts[0], info?.type, errors, `${label}, початок`);
-        const to = parseScalar(parts[1], info?.type, errors, `${label}, кінець`);
+        const from = parseScalar(parts[0], info && info.type, errors, `${label}, початок`);
+        const to = parseScalar(parts[1], info && info.type, errors, `${label}, кінець`);
         if (from && to) result.push(`${left} BETWEEN ${from} AND ${to}`);
         return;
       }
       if (filter.op === "IN" || filter.op === "NOT IN") {
         const parts = raw.split(",").map((item) => item.trim());
         if (!parts.length || parts.some((item) => !item)) { errors.push(`${label}: список містить порожнє значення.`); return; }
-        const values = parts.map((item) => parseScalar(item, info?.type, errors, label));
+        const values = parts.map((item) => parseScalar(item, info && info.type, errors, label));
         if (values.every(Boolean)) result.push(`${left} ${filter.op} (${values.join(", ")})`);
         return;
       }
       if (filter.op === "LIKE" || filter.op === "LIKE_UPPER") {
-        if (info?.type === "NUMBER" || info?.type === "DATE") { errors.push(`${label}: пошук тексту не можна застосувати до типу ${info.type}.`); return; }
+        if (info && (info.type === "NUMBER" || info.type === "DATE")) { errors.push(`${label}: пошук тексту не можна застосувати до типу ${info.type}.`); return; }
         const pattern = raw.includes("%") || raw.includes("_") ? raw : `%${raw}%`;
         result.push(filter.op === "LIKE_UPPER" ? `UPPER(${left}) LIKE UPPER(${escapeLiteral(pattern)})` : `${left} LIKE ${escapeLiteral(pattern)}`);
         return;
       }
-      const value = parseScalar(raw, info?.type, errors, label);
+      const value = parseScalar(raw, info && info.type, errors, label);
       if (value) result.push(`${left} ${filter.op} ${value}`);
     });
     return result;
@@ -2009,12 +2009,12 @@ window.SqlBuilder = (function () {
     let expression = item.agg === "COUNT_DISTINCT" ? `COUNT(DISTINCT ${base})` : item.agg ? `${item.agg}(${base})` : base;
     if (!withAlias) return expression;
     const info = column(item.table, item.column);
-    const alias = item.outAlias || item.alias || (ctas ? item.column : info?.label || item.column);
+    const alias = item.outAlias || item.alias || (ctas ? item.column : (info && info.label) || item.column);
     return `${expression} AS "${String(alias).replace(/"/g, '""')}"`;
   }
 
   function metricExpression(id, aliases) {
-    const metric = SQL_SCHEMA.metrics?.find((item) => item.id === id);
+    const metric = (SQL_SCHEMA.metrics || []).find((item) => item.id === id);
     if (!metric || metric.tables.some((tableId) => !aliases[tableId])) return null;
     return { metric, expression: replaceAliases(metric.expression, aliases) };
   }
@@ -2045,7 +2045,7 @@ window.SqlBuilder = (function () {
       if (rule.tables.every((id) => plan.allTables.includes(id))) rule.expressions.forEach((expression) => where.push(replaceAliases(expression, aliases)));
     });
     (state.presets || []).forEach((presetId) => {
-      const preset = SQL_SCHEMA.semanticPresets?.find((item) => item.id === presetId);
+      const preset = (SQL_SCHEMA.semanticPresets || []).find((item) => item.id === presetId);
       if (!preset) return;
       if (!preset.tables.every((id) => plan.allTables.includes(id))) errors.push(`Preset «${preset.label}» потребує джерел: ${preset.tables.join(", ")}.`);
       else preset.filters.forEach((expression) => where.push(replaceAliases(expression, aliases)));
@@ -2094,8 +2094,8 @@ window.SqlBuilder = (function () {
       leftTable: edge.left, rightTable: edge.right, conditions: edge.conditions.map((item) => ({ ...item })),
       type: edge.type, cardinality: edge.cardinality, preferredRoot: edge.preferredRoot,
       leftSource: edge.leftSource, rightSource: edge.rightSource, note: edge.note || "",
-      variants: edge.variants?.map((variant) => ({ ...variant, conditions: variant.conditions.map((item) => ({ ...item })) })) || [],
-      selectedVariant: edge.variants?.[0]?.id || "",
+      variants: (edge.variants || []).map((variant) => ({ ...variant, conditions: variant.conditions.map((item) => ({ ...item })) })),
+      selectedVariant: edge.variants && edge.variants[0] ? edge.variants[0].id : "",
     }));
   }
 
@@ -2281,11 +2281,13 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   function tLabel(id) {
-    return SQL_SCHEMA.getTable(id)?.label || id;
+    const item = SQL_SCHEMA.getTable(id);
+    return (item && item.label) || id;
   }
   function cLabel(tableId, col) {
     const t = SQL_SCHEMA.getTable(tableId);
-    return t?.columns.find((x) => x.name === col)?.label || col;
+    const item = t && t.columns.find((x) => x.name === col);
+    return (item && item.label) || col;
   }
   function notify(msg, ok = true) {
     const el = $("#toast");
@@ -2313,7 +2315,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     root.innerHTML = "";
     const byGroup = {};
     SQL_SCHEMA.tables.forEach((t) => {
-      (byGroup[t.group] ||= []).push(t);
+      if (!byGroup[t.group]) byGroup[t.group] = [];
+      byGroup[t.group].push(t);
     });
     Object.keys(byGroup).forEach((g) => {
       const sec = document.createElement("section");
@@ -2393,11 +2396,11 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     hint.textContent = "Зв’язки будуються автоматично як граф. Порядок вибору джерел не впливає на SQL.";
     const result = SqlBuilder.build(state);
     const graph = result.graph;
-    const bridges = graph?.bridgeTables || [];
+    const bridges = (graph && graph.bridgeTables) || [];
     $("#bridge-info").textContent = bridges.length
       ? `Автоматично додані проміжні таблиці: ${bridges.map(tLabel).join(", ")}`
       : "";
-    (graph?.edges || []).forEach((edge, idx) => root.appendChild(joinRow({
+    ((graph && graph.edges) || []).forEach((edge, idx) => root.appendChild(joinRow({
       ...edge,
       leftTable: edge.left,
       rightTable: edge.right,
@@ -2423,7 +2426,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         ${j.note ? `<div class="join-note">${j.note}</div>` : ""}
       </div>
     `;
-    $("[data-join-variant]", row)?.addEventListener("change", (event) => {
+    const variantSelect = $("[data-join-variant]", row);
+    if (variantSelect) variantSelect.addEventListener("change", (event) => {
       const selectedVariant = event.target.value;
       const existing = state.joins.find((item) => item.id === j.id);
       if (existing) existing.selectedVariant = selectedVariant;
@@ -2434,7 +2438,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     return row;
   }
   function colOptions(tableId, selected) {
-    return (SQL_SCHEMA.getTable(tableId)?.columns || [])
+    const item = SQL_SCHEMA.getTable(tableId);
+    return ((item && item.columns) || [])
       .map(
         (c) =>
           `<option value="${c.name}" ${c.name === selected ? "selected" : ""}>${c.label}</option>`
@@ -2555,7 +2560,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         renderOrder();
         updateSql();
       });
-      $("[data-up]", card)?.addEventListener("click", () => {
+      const upButton = $("[data-up]", card);
+      if (upButton) upButton.addEventListener("click", () => {
         if (idx <= 0) return;
         [state.fields[idx - 1], state.fields[idx]] = [
           state.fields[idx],
@@ -2566,7 +2572,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         renderOrder();
         updateSql();
       });
-      $("[data-down]", card)?.addEventListener("click", () => {
+      const downButton = $("[data-down]", card);
+      if (downButton) downButton.addEventListener("click", () => {
         if (idx >= state.fields.length - 1) return;
         [state.fields[idx], state.fields[idx + 1]] = [
           state.fields[idx + 1],
@@ -2602,8 +2609,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   }
   function isNumericColumn(tableId, colName) {
     const t = SQL_SCHEMA.getTable(tableId);
-    const c = t?.columns.find((x) => x.name === colName);
-    const ty = (c?.type || "").toUpperCase();
+    const c = t && t.columns.find((x) => x.name === colName);
+    const ty = ((c && c.type) || "").toUpperCase();
     return /NUMBER|INT|FLOAT|DECIMAL/.test(ty);
   }
   function swapOrderIndexes(a, b) {
@@ -2629,7 +2636,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       fieldOpts = state.fields
         .map((f, i) => {
           const op = f.agg
-            ? SQL_SCHEMA.aggregates.find((a) => a.id === f.agg)?.label + " · "
+            ? ((SQL_SCHEMA.aggregates.find((a) => a.id === f.agg) || {}).label || "") + " · "
             : "";
           return `<option value="f:${i}" ${
             o.fieldIndex === i ? "selected" : ""
@@ -2638,7 +2645,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         .join("");
     } else {
       state.tables.forEach((tid) => {
-        SQL_SCHEMA.getTable(tid)?.columns.forEach((c) => {
+        const selectedTable = SQL_SCHEMA.getTable(tid);
+        if (selectedTable) selectedTable.columns.forEach((c) => {
           const val = `c:${tid}.${c.name}`;
           const selected =
             o.fieldIndex == null && o.table === tid && o.column === c.name;
@@ -2687,7 +2695,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         const match = state.fields.find(
           (f) => f.table === o.table && f.column === o.column && f.agg
         );
-        o.agg = match?.agg || "";
+        o.agg = (match && match.agg) || "";
       }
       updateSql();
     });
@@ -2718,7 +2726,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const tid = state.tables[0];
       state.filters.push({
         table: tid,
-        column: SQL_SCHEMA.getTable(tid)?.columns[0]?.name || "",
+        column: SQL_SCHEMA.getTable(tid).columns[0] ? SQL_SCHEMA.getTable(tid).columns[0].name : "",
         op: "=",
         value: "",
       });
@@ -2748,7 +2756,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     }
     state.tables.forEach((tid) => {
       const t = SQL_SCHEMA.getTable(tid);
-      (t?.columns || []).forEach((c) => {
+      ((t && t.columns) || []).forEach((c) => {
         const name = c.label.toLowerCase();
         if (/\b(іпн|рнокпп|єдрпоу|код|номер)\b/i.test(c.label) || /ident|edrpou|kod|code|numident/i.test(c.name)) {
           chips.push({
@@ -2842,7 +2850,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const go = () => {
         f[el.dataset.k] = el.value;
         if (el.dataset.k === "table") {
-          f.column = SQL_SCHEMA.getTable(f.table)?.columns[0]?.name || "";
+          const selectedTable = SQL_SCHEMA.getTable(f.table);
+          f.column = selectedTable && selectedTable.columns[0] ? selectedTable.columns[0].name : "";
         }
         if (el.dataset.k === "table" || el.dataset.k === "op") renderFilters();
         updateSql();
@@ -2873,7 +2882,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     lines.push(
       `<li><b>Джерела:</b> ${state.tables.map(tLabel).join("; ")}</li>`
     );
-    const resolvedEdges = result?.graph?.edges || [];
+    const resolvedEdges = (result && result.graph && result.graph.edges) || [];
     if (resolvedEdges.length) {
       lines.push(
         `<li><b>З’єднання:</b> ${resolvedEdges
@@ -2890,7 +2899,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         `<li><b>У результаті:</b> ${state.fields
           .map((f) => {
             const a = f.agg
-              ? SQL_SCHEMA.aggregates.find((x) => x.id === f.agg)?.label + " — "
+              ? ((SQL_SCHEMA.aggregates.find((x) => x.id === f.agg) || {}).label || "") + " — "
               : "";
             return a + cLabel(f.table, f.column);
           })
@@ -2900,7 +2909,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       lines.push(`<li><b>У результаті:</b> усі поля</li>`);
     }
     if (state.metrics.length) {
-      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => SQL_SCHEMA.metrics.find((metric) => metric.id === id)?.label || id).join("; ")}</li>`);
+      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => {
+        const metric = SQL_SCHEMA.metrics.find((item) => item.id === id);
+        return (metric && metric.label) || id;
+      }).join("; ")}</li>`);
     }
     if (state.orderBy.length) {
       lines.push(`<li><b>Сортування:</b> ${state.orderBy.length} правил(а)</li>`);
@@ -2910,14 +2922,14 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         `<li><b>Фільтри:</b> ${state.filters
           .map((f) => {
             const op =
-              SQL_SCHEMA.operators.find((o) => o.id === f.op)?.label || f.op;
+              (SQL_SCHEMA.operators.find((o) => o.id === f.op) || {}).label || f.op;
             return `${cLabel(f.table, f.column)} ${op} ${f.value || "…"}`;
           })
           .join("; ")}</li>`
       );
     }
     const modeLabel =
-      SQL_SCHEMA.outputModes.find((m) => m.id === state.mode)?.label ||
+      (SQL_SCHEMA.outputModes.find((m) => m.id === state.mode) || {}).label ||
       state.mode;
     lines.push(`<li><b>Дія:</b> ${modeLabel}</li>`);
     return `<ul>${lines.join("")}</ul>`;
@@ -3022,7 +3034,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     try {
       await navigator.clipboard.writeText(sql);
       notify("Шаблон скопійовано");
-    } catch {
+    } catch (error) {
       const area = document.createElement("textarea");
       area.value = sql;
       document.body.appendChild(area);
@@ -3094,7 +3106,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       try {
         await navigator.clipboard.writeText($("#sql-out").value);
         notify("Скопійовано");
-      } catch {
+      } catch (error) {
         $("#sql-out").select();
         document.execCommand("copy");
         notify("Скопійовано");

@@ -1,4 +1,16 @@
 $ErrorActionPreference = "Stop"
+$runtimeFiles = @(
+  "$PSScriptRoot\..\data\schema.js",
+  "$PSScriptRoot\..\js\sql-builder.js",
+  "$PSScriptRoot\..\js\template-utils.js",
+  "$PSScriptRoot\..\js\app.js"
+)
+foreach ($runtimeFile in $runtimeFiles) {
+  $runtimeSource = [IO.File]::ReadAllText((Resolve-Path $runtimeFile), [Text.Encoding]::UTF8)
+  if ($runtimeSource -match '\?\.|\?\?|\|\|=|&&=|\?\?=') {
+    throw "Unsupported modern JavaScript operator found in $runtimeFile"
+  }
+}
 $browser = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path -LiteralPath $browser)) {
   throw "Google Chrome не знайдено: $browser"

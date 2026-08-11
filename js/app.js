@@ -138,11 +138,13 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   function tLabel(id) {
-    return SQL_SCHEMA.getTable(id)?.label || id;
+    const item = SQL_SCHEMA.getTable(id);
+    return (item && item.label) || id;
   }
   function cLabel(tableId, col) {
     const t = SQL_SCHEMA.getTable(tableId);
-    return t?.columns.find((x) => x.name === col)?.label || col;
+    const item = t && t.columns.find((x) => x.name === col);
+    return (item && item.label) || col;
   }
   function notify(msg, ok = true) {
     const el = $("#toast");
@@ -170,7 +172,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     root.innerHTML = "";
     const byGroup = {};
     SQL_SCHEMA.tables.forEach((t) => {
-      (byGroup[t.group] ||= []).push(t);
+      if (!byGroup[t.group]) byGroup[t.group] = [];
+      byGroup[t.group].push(t);
     });
     Object.keys(byGroup).forEach((g) => {
       const sec = document.createElement("section");
@@ -250,11 +253,11 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     hint.textContent = "Зв’язки будуються автоматично як граф. Порядок вибору джерел не впливає на SQL.";
     const result = SqlBuilder.build(state);
     const graph = result.graph;
-    const bridges = graph?.bridgeTables || [];
+    const bridges = (graph && graph.bridgeTables) || [];
     $("#bridge-info").textContent = bridges.length
       ? `Автоматично додані проміжні таблиці: ${bridges.map(tLabel).join(", ")}`
       : "";
-    (graph?.edges || []).forEach((edge, idx) => root.appendChild(joinRow({
+    ((graph && graph.edges) || []).forEach((edge, idx) => root.appendChild(joinRow({
       ...edge,
       leftTable: edge.left,
       rightTable: edge.right,
@@ -280,7 +283,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         ${j.note ? `<div class="join-note">${j.note}</div>` : ""}
       </div>
     `;
-    $("[data-join-variant]", row)?.addEventListener("change", (event) => {
+    const variantSelect = $("[data-join-variant]", row);
+    if (variantSelect) variantSelect.addEventListener("change", (event) => {
       const selectedVariant = event.target.value;
       const existing = state.joins.find((item) => item.id === j.id);
       if (existing) existing.selectedVariant = selectedVariant;
@@ -291,7 +295,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     return row;
   }
   function colOptions(tableId, selected) {
-    return (SQL_SCHEMA.getTable(tableId)?.columns || [])
+    const item = SQL_SCHEMA.getTable(tableId);
+    return ((item && item.columns) || [])
       .map(
         (c) =>
           `<option value="${c.name}" ${c.name === selected ? "selected" : ""}>${c.label}</option>`
@@ -412,7 +417,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         renderOrder();
         updateSql();
       });
-      $("[data-up]", card)?.addEventListener("click", () => {
+      const upButton = $("[data-up]", card);
+      if (upButton) upButton.addEventListener("click", () => {
         if (idx <= 0) return;
         [state.fields[idx - 1], state.fields[idx]] = [
           state.fields[idx],
@@ -423,7 +429,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         renderOrder();
         updateSql();
       });
-      $("[data-down]", card)?.addEventListener("click", () => {
+      const downButton = $("[data-down]", card);
+      if (downButton) downButton.addEventListener("click", () => {
         if (idx >= state.fields.length - 1) return;
         [state.fields[idx], state.fields[idx + 1]] = [
           state.fields[idx + 1],
@@ -459,8 +466,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   }
   function isNumericColumn(tableId, colName) {
     const t = SQL_SCHEMA.getTable(tableId);
-    const c = t?.columns.find((x) => x.name === colName);
-    const ty = (c?.type || "").toUpperCase();
+    const c = t && t.columns.find((x) => x.name === colName);
+    const ty = ((c && c.type) || "").toUpperCase();
     return /NUMBER|INT|FLOAT|DECIMAL/.test(ty);
   }
   function swapOrderIndexes(a, b) {
@@ -486,7 +493,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       fieldOpts = state.fields
         .map((f, i) => {
           const op = f.agg
-            ? SQL_SCHEMA.aggregates.find((a) => a.id === f.agg)?.label + " · "
+            ? ((SQL_SCHEMA.aggregates.find((a) => a.id === f.agg) || {}).label || "") + " · "
             : "";
           return `<option value="f:${i}" ${
             o.fieldIndex === i ? "selected" : ""
@@ -495,7 +502,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         .join("");
     } else {
       state.tables.forEach((tid) => {
-        SQL_SCHEMA.getTable(tid)?.columns.forEach((c) => {
+        const selectedTable = SQL_SCHEMA.getTable(tid);
+        if (selectedTable) selectedTable.columns.forEach((c) => {
           const val = `c:${tid}.${c.name}`;
           const selected =
             o.fieldIndex == null && o.table === tid && o.column === c.name;
@@ -544,7 +552,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         const match = state.fields.find(
           (f) => f.table === o.table && f.column === o.column && f.agg
         );
-        o.agg = match?.agg || "";
+        o.agg = (match && match.agg) || "";
       }
       updateSql();
     });
@@ -575,7 +583,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const tid = state.tables[0];
       state.filters.push({
         table: tid,
-        column: SQL_SCHEMA.getTable(tid)?.columns[0]?.name || "",
+        column: SQL_SCHEMA.getTable(tid).columns[0] ? SQL_SCHEMA.getTable(tid).columns[0].name : "",
         op: "=",
         value: "",
       });
@@ -605,7 +613,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     }
     state.tables.forEach((tid) => {
       const t = SQL_SCHEMA.getTable(tid);
-      (t?.columns || []).forEach((c) => {
+      ((t && t.columns) || []).forEach((c) => {
         const name = c.label.toLowerCase();
         if (/\b(іпн|рнокпп|єдрпоу|код|номер)\b/i.test(c.label) || /ident|edrpou|kod|code|numident/i.test(c.name)) {
           chips.push({
@@ -699,7 +707,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const go = () => {
         f[el.dataset.k] = el.value;
         if (el.dataset.k === "table") {
-          f.column = SQL_SCHEMA.getTable(f.table)?.columns[0]?.name || "";
+          const selectedTable = SQL_SCHEMA.getTable(f.table);
+          f.column = selectedTable && selectedTable.columns[0] ? selectedTable.columns[0].name : "";
         }
         if (el.dataset.k === "table" || el.dataset.k === "op") renderFilters();
         updateSql();
@@ -730,7 +739,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     lines.push(
       `<li><b>Джерела:</b> ${state.tables.map(tLabel).join("; ")}</li>`
     );
-    const resolvedEdges = result?.graph?.edges || [];
+    const resolvedEdges = (result && result.graph && result.graph.edges) || [];
     if (resolvedEdges.length) {
       lines.push(
         `<li><b>З’єднання:</b> ${resolvedEdges
@@ -747,7 +756,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         `<li><b>У результаті:</b> ${state.fields
           .map((f) => {
             const a = f.agg
-              ? SQL_SCHEMA.aggregates.find((x) => x.id === f.agg)?.label + " — "
+              ? ((SQL_SCHEMA.aggregates.find((x) => x.id === f.agg) || {}).label || "") + " — "
               : "";
             return a + cLabel(f.table, f.column);
           })
@@ -757,7 +766,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       lines.push(`<li><b>У результаті:</b> усі поля</li>`);
     }
     if (state.metrics.length) {
-      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => SQL_SCHEMA.metrics.find((metric) => metric.id === id)?.label || id).join("; ")}</li>`);
+      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => {
+        const metric = SQL_SCHEMA.metrics.find((item) => item.id === id);
+        return (metric && metric.label) || id;
+      }).join("; ")}</li>`);
     }
     if (state.orderBy.length) {
       lines.push(`<li><b>Сортування:</b> ${state.orderBy.length} правил(а)</li>`);
@@ -767,14 +779,14 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         `<li><b>Фільтри:</b> ${state.filters
           .map((f) => {
             const op =
-              SQL_SCHEMA.operators.find((o) => o.id === f.op)?.label || f.op;
+              (SQL_SCHEMA.operators.find((o) => o.id === f.op) || {}).label || f.op;
             return `${cLabel(f.table, f.column)} ${op} ${f.value || "…"}`;
           })
           .join("; ")}</li>`
       );
     }
     const modeLabel =
-      SQL_SCHEMA.outputModes.find((m) => m.id === state.mode)?.label ||
+      (SQL_SCHEMA.outputModes.find((m) => m.id === state.mode) || {}).label ||
       state.mode;
     lines.push(`<li><b>Дія:</b> ${modeLabel}</li>`);
     return `<ul>${lines.join("")}</ul>`;
@@ -879,7 +891,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     try {
       await navigator.clipboard.writeText(sql);
       notify("Шаблон скопійовано");
-    } catch {
+    } catch (error) {
       const area = document.createElement("textarea");
       area.value = sql;
       document.body.appendChild(area);
@@ -951,7 +963,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       try {
         await navigator.clipboard.writeText($("#sql-out").value);
         notify("Скопійовано");
-      } catch {
+      } catch (error) {
         $("#sql-out").select();
         document.execCommand("copy");
         notify("Скопійовано");
