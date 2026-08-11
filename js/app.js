@@ -7,6 +7,7 @@
     filters: [],
     orderBy: [],
     metrics: [],
+    presets: [],
     mode: "select",
     targetTable: "work_result",
   };
@@ -16,7 +17,7 @@
       id: "t6_2026_edrpou",
       title: "t6_edrpou",
       description:
-        "Скрипт для створення таблиці t6_2026_edrpou з пакета T6 за 2026 рік.",
+        "Скрипт для створення зведення з пакетів T6 за вибраний період.",
       sql: `drop table t6_2026_edrpou purge;
 create table t6_2026_edrpou as
 select /*+parallel(pd,8)*/
@@ -49,8 +50,9 @@ where plb.slb_fixed = 'Y'
   and plb.slb_actuality = 'Y'
   and plb.slb_st = 'O'
   and pd.aped46_st = 'O'
-  and nvl(pd.aped46_year, plb.slb_charg_year) = {{YEAR}}
+  and nvl(pd.aped46_year, plb.slb_charg_year) between {{YEAR_START}} and {{YEAR_END}}
   and nvl(aped46_mnth, slb_charg_mnth) between {{MONTH_START}} and {{MONTH_END}}
+  {{APED46_OTK_CONDITION}}
 group by lpad(mrd.mrd_reg_code, 2,0),
          slb_im,
          ian_numident,
@@ -71,7 +73,7 @@ group by lpad(mrd.mrd_reg_code, 2,0),
       id: "t1_2024",
       title: "t1",
       description:
-        "КВЕД і ознака бюджетної організації зі звітності APE 4-1 за 2022–2025 роки.",
+        "КВЕД і ознака бюджетної організації зі звітності APE 4-1 за вибраний період.",
       sql: `DROP TABLE t1_2024;
 
 CREATE TABLE t1_2024 AS
@@ -84,7 +86,7 @@ SELECT /*+ PARALLEL(plb, 8) */
 FROM ikis_websm.sm_packlabel plb
 JOIN ikis_websm.sm_ape4_1 app4
   ON app4.ape1_slb = plb.slb_id
-WHERE plb.slb_charg_year BETWEEN 2022 AND 2025
+WHERE plb.slb_charg_year BETWEEN {{YEAR_START}} AND {{YEAR_END}}
   AND plb.slb_charg_mnth BETWEEN {{MONTH_START}} AND {{MONTH_END}}
   AND plb.slb_system = 1
   AND plb.slb_actuality = 'Y'
@@ -104,7 +106,7 @@ FROM t1_2024;
       id: "t2_2022",
       title: "t2",
       description:
-        "Зведення категорій ЗО, утримань і внесків із SK_APEQ_DODATOK2_DATA за 2024 рік.",
+        "Зведення категорій ЗО, утримань і внесків із SK_APEQ_DODATOK2_DATA за вибраний період.",
       sql: `CREATE TABLE t2_2022 AS
 SELECT /*+ PARALLEL(t, 8) */
        TO_CHAR(LPAD(spl.spl_ru, 2, 0)) AS reg,
@@ -119,8 +121,8 @@ JOIN ikis_websm.sk_packlabel spl
   ON spl.spl_id = t.apqd2_spl
 JOIN ikis_websm.sk_packlabel_extended sple
   ON sple.sple_id = spl.spl_id
-WHERE t.apqd2_year = 2024
-  AND t.apqd2_mnth BETWEEN 1 AND 12
+WHERE t.apqd2_year BETWEEN {{YEAR_START}} AND {{YEAR_END}}
+  AND t.apqd2_mnth BETWEEN {{MONTH_START}} AND {{MONTH_END}}
   AND t.apqd2_st = 'O'
   AND spl.spl_actuality = 'Y'
 GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
@@ -196,7 +198,6 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     const i = state.tables.indexOf(id);
     if (i >= 0) state.tables.splice(i, 1);
     else state.tables.push(id);
-    state.joins = SqlBuilder.suggestJoinsForTables(state.tables);
     state.fields = state.fields.filter((f) => state.tables.includes(f.table));
     state.metrics = state.metrics.filter((id) => {
       const metric = SQL_SCHEMA.metrics.find((m) => m.id === id);
@@ -245,7 +246,17 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       return;
     }
     hint.textContent = "Зв’язки будуються автоматично як граф. Порядок вибору джерел не впливає на SQL.";
-    state.joins.forEach((j, idx) => root.appendChild(joinRow(j, idx)));
+    const result = SqlBuilder.build(state);
+    const graph = result.graph;
+    const bridges = graph?.bridgeTables || [];
+    $("#bridge-info").textContent = bridges.length
+      ? `Автоматично додані проміжні таблиці: ${bridges.map(tLabel).join(", ")}`
+      : "";
+    (graph?.edges || []).forEach((edge, idx) => root.appendChild(joinRow({
+      ...edge,
+      leftTable: edge.left,
+      rightTable: edge.right,
+    }, idx)));
   }
   function joinRow(j, idx) {
     const row = document.createElement("div");
@@ -268,11 +279,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       </div>
     `;
     $("[data-join-variant]", row)?.addEventListener("change", (event) => {
-      j.selectedVariant = event.target.value;
-      const variant = j.variants.find((item) => item.id === j.selectedVariant);
-      j.conditions = variant.conditions.map((item) => ({ ...item }));
-      j.leftSource = variant.leftSource || j.leftSource;
-      j.rightSource = variant.rightSource || j.rightSource;
+      const selectedVariant = event.target.value;
+      const existing = state.joins.find((item) => item.id === j.id);
+      if (existing) existing.selectedVariant = selectedVariant;
+      else state.joins.push({ id: j.id, selectedVariant });
       renderJoins();
       updateSql();
     });
@@ -696,22 +706,22 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     status.innerHTML = result.errors.length
       ? result.errors.map((error) => `<p><strong>Помилка:</strong> ${error}</p>`).join("")
       : result.warnings.map((warning) => `<p><strong>Увага:</strong> ${warning}</p>`).join("");
-    $("#sql-explain").innerHTML = buildExplain();
+    $("#sql-explain").innerHTML = buildExplain(result);
   }
-  function buildExplain() {
+  function buildExplain(result) {
     if (!state.tables.length) return "<p>Поки нічого не зібрано.</p>";
     const lines = [];
     lines.push(
       `<li><b>Джерела:</b> ${state.tables.map(tLabel).join("; ")}</li>`
     );
-    if (state.joins.length) {
+    const resolvedEdges = result?.graph?.edges || [];
+    if (resolvedEdges.length) {
       lines.push(
-        `<li><b>З’єднання:</b> ${state.joins
+        `<li><b>З’єднання:</b> ${resolvedEdges
           .map(
-            (j) =>
-              `${tLabel(j.leftTable)} [${cLabel(j.leftTable, j.leftCol)}] = ${tLabel(
-                j.rightTable
-              )} [${cLabel(j.rightTable, j.rightCol)}]`
+            (j) => `${tLabel(j.left)} ↔ ${tLabel(j.right)}: ${(j.conditions || []).map((condition) =>
+              `[${cLabel(j.left, condition.leftCol)}] = [${cLabel(j.right, condition.rightCol)}]`
+            ).join(" AND ")}`
           )
           .join("; ")}</li>`
       );
@@ -802,12 +812,14 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       filters: [],
       orderBy: [],
       metrics: [],
+      presets: [],
       mode: "select",
       targetTable: "work_result",
     });
     renderCatalog();
     renderSelectedStrip();
     renderModeUi();
+    $("#preset-current-insurer").checked = false;
     syncSteps();
     updateSql();
     notify("Очищено");
@@ -860,21 +872,16 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
 
   function getTemplateSettings() {
     return {
-      year: Number($("#tpl-year").value) || 2026,
+      yearStart: Number($("#tpl-year-start").value) || 2022,
+      yearEnd: Number($("#tpl-year-end").value) || 2026,
       monthStart: Number($("#tpl-month-start").value) || 1,
       monthEnd: Number($("#tpl-month-end").value) || 6,
+      otk: $("#tpl-otk").value,
     };
   }
 
   function applyTemplateSettings(sql) {
-    const settings = getTemplateSettings();
-    const year = String(settings.year);
-    const monthStart = String(settings.monthStart).padStart(2, "0");
-    const monthEnd = String(settings.monthEnd).padStart(2, "0");
-    return sql
-      .replace(/\{\{YEAR\}\}/g, year)
-      .replace(/\{\{MONTH_START\}\}/g, monthStart)
-      .replace(/\{\{MONTH_END\}\}/g, monthEnd);
+    return TemplateUtils.apply(sql, getTemplateSettings());
   }
 
   function bind() {
@@ -893,6 +900,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
     $("#target-table").addEventListener("input", (e) => {
       state.targetTable = e.target.value.trim() || "work_result";
+      updateSql();
+    });
+    $("#preset-current-insurer").addEventListener("change", (event) => {
+      state.presets = event.target.checked ? ["current_insurer_profile"] : [];
       updateSql();
     });
     $("#btn-add-order").addEventListener("click", () => {

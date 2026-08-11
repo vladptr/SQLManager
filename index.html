@@ -79,7 +79,13 @@
             <div class="block" id="joins-block">
               <h3 class="block-title">З’єднання джерел</h3>
               <p class="hint" id="joins-hint"></p>
+              <div id="bridge-info" class="hint"></div>
               <div id="joins-list"></div>
+            </div>
+            <div class="block">
+              <h3 class="block-title">Семантичні правила</h3>
+              <label><input id="preset-current-insurer" type="checkbox" /> Актуальні реквізити та КВЕД страхувальника</label>
+              <p class="hint">Додає статуси актуальності лише за вашим вибором; історичні записи не фільтруються автоматично.</p>
             </div>
           </section>
 
@@ -167,8 +173,12 @@
             <div class="template-settings" id="template-settings">
               <div class="template-settings-row">
                 <label>
-                  Рік
-                  <input id="tpl-year" type="number" min="2000" max="2100" value="2026" />
+                  Рік від
+                  <input id="tpl-year-start" type="number" min="2000" max="2100" value="2022" />
+                </label>
+                <label>
+                  Рік до
+                  <input id="tpl-year-end" type="number" min="2000" max="2100" value="2026" />
                 </label>
                 <label>
                   Місяць від
@@ -177,6 +187,14 @@
                 <label>
                   Місяць до
                   <input id="tpl-month-end" type="number" min="1" max="12" value="6" />
+                </label>
+                <label>
+                  OTK (1/0, лише T6)
+                  <select id="tpl-otk">
+                    <option value="any">Будь-яке</option>
+                    <option value="1">Так (1)</option>
+                    <option value="0">Ні (0)</option>
+                  </select>
                 </label>
               </div>
             </div>
@@ -215,6 +233,7 @@
 
     <script src="data/schema.js"></script>
     <script src="js/sql-builder.js"></script>
+    <script src="js/template-utils.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

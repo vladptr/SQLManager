@@ -33,14 +33,13 @@ window.SqlBuilder = (function () {
     return aliases;
   }
 
-  function normalizedEdges(state, selected) {
-    const selectedSet = new Set(selected);
-    const configured = state.joins?.length ? state.joins : SQL_SCHEMA.joins;
-    return configured
-      .filter((edge) => selectedSet.has(edge.left || edge.leftTable) && selectedSet.has(edge.right || edge.rightTable))
-      .map((edge) => {
+  function normalizedEdges(state, catalog = SQL_SCHEMA.joins) {
+    const overrides = new Map((state.joins || []).filter((edge) => edge.id).map((edge) => [edge.id, edge]));
+    return catalog.map((catalogEdge) => {
+        const edge = { ...catalogEdge, ...(overrides.get(catalogEdge.id) || {}) };
         const variant = edge.variants?.find((item) => item.id === edge.selectedVariant) || edge.variants?.[0];
         return {
+        id: edge.id,
         left: edge.left || edge.leftTable,
         right: edge.right || edge.rightTable,
         conditions: variant?.conditions || edge.conditions || (edge.leftCol && edge.rightCol ? [{ leftCol: edge.leftCol, rightCol: edge.rightCol }] : []),
@@ -50,6 +49,10 @@ window.SqlBuilder = (function () {
         leftSource: variant?.leftSource || edge.leftSource,
         rightSource: variant?.rightSource || edge.rightSource,
         note: edge.note || "",
+        isDefault: edge.isDefault !== false,
+        weight: Number(edge.weight) || (edge.isDefault === false ? 20 : 5),
+        variants: edge.variants || [],
+        selectedVariant: edge.selectedVariant || edge.variants?.[0]?.id || "",
         };
       });
   }
@@ -60,16 +63,70 @@ window.SqlBuilder = (function () {
     return [...selected].sort((a, b) => (table(a)?.fullName || a).localeCompare(table(b)?.fullName || b))[0];
   }
 
-  function buildJoinPlan(state, selected, aliases) {
+  function shortestPath(startSet, target, edges) {
+    const queue = [...startSet].map((node) => ({ node, cost: 0, path: [], signature: "" }));
+    const best = new Map();
+    const solutions = [];
+    while (queue.length) {
+      queue.sort((a, b) => a.cost - b.cost || a.signature.localeCompare(b.signature));
+      const current = queue.shift();
+      if (current.cost > (best.get(current.node) ?? Infinity)) continue;
+      best.set(current.node, current.cost);
+      if (current.node === target) { solutions.push(current); continue; }
+      edges.filter((edge) => edge.isDefault && (edge.left === current.node || edge.right === current.node)).forEach((edge) => {
+        const next = edge.left === current.node ? edge.right : edge.left;
+        if (current.path.some((item) => item.edge.id === edge.id)) return;
+        const cost = current.cost + edge.weight;
+        if (cost > (best.get(next) ?? Infinity)) return;
+        const step = { edge, from: current.node, to: next };
+        queue.push({ node: next, cost, path: [...current.path, step], signature: `${current.signature}|${edge.id}` });
+      });
+    }
+    if (!solutions.length) return { path: null, ambiguous: false };
+    solutions.sort((a, b) => a.cost - b.cost || a.signature.localeCompare(b.signature));
+    const minimum = solutions[0].cost;
+    const tied = unique(solutions.filter((item) => item.cost === minimum).map((item) => item.signature));
+    return { path: solutions[0].path, ambiguous: tied.length > 1 };
+  }
+
+  function resolveJoinGraph(selectedTableIds, joinCatalog, overrides) {
+    const userTables = unique(selectedTableIds.filter((id) => table(id))).sort();
+    const state = { joins: overrides || [] };
+    const edges = joinCatalog
+      ? (joinCatalog.every((edge) => typeof edge.weight === "number" && typeof edge.isDefault === "boolean")
+        ? joinCatalog
+        : normalizedEdges(state, joinCatalog))
+      : normalizedEdges(state);
+    const errors = [];
+    const warnings = [];
+    if (!userTables.length) return { root: null, userTables, bridgeTables: [], allTables: [], edges: [], errors: ["Оберіть хоча б одне джерело."], warnings };
+    const root = chooseRoot(userTables, edges);
+    const connected = new Set([root]);
+    const resolved = new Map();
+    userTables.filter((id) => id !== root).sort().forEach((target) => {
+      if (connected.has(target)) return;
+      const found = shortestPath(connected, target, edges);
+      if (!found.path) { errors.push(`Неможливо знайти шлях до джерела «${table(target)?.label || target}».`); return; }
+      if (found.ambiguous) { errors.push(`Для джерела «${table(target)?.label || target}» існує кілька рівноцінних маршрутів. Виберіть семантичний маршрут.`); return; }
+      found.path.forEach((step) => { resolved.set(step.edge.id, step.edge); connected.add(step.from); connected.add(step.to); });
+    });
+    const allTables = [...connected].sort();
+    const bridgeTables = allTables.filter((id) => !userTables.includes(id));
+    return { root, userTables, bridgeTables, allTables, edges: [...resolved.values()], errors, warnings };
+  }
+
+  function buildJoinPlan(state, selected) {
     const errors = [];
     const warnings = [];
     const ctes = [];
-    if (!selected.length) return { errors: ["Оберіть хоча б одне джерело."], warnings, ctes, root: null, joins: [] };
-    const edges = normalizedEdges(state, selected);
-    const root = chooseRoot(selected, edges);
+    const graph = resolveJoinGraph(selected, normalizedEdges(state), state.joins);
+    if (graph.errors.length) return { ...graph, errors: graph.errors, warnings, ctes, joins: [], aliases: assignAliases(graph.allTables) };
+    const aliases = assignAliases(graph.allTables);
+    const edges = graph.edges;
+    const root = graph.root;
     const visited = new Set([root]);
     const joins = [];
-    while (visited.size < selected.length) {
+    while (visited.size < graph.allTables.length) {
       const candidates = edges
         .filter((edge) => visited.has(edge.left) !== visited.has(edge.right))
         .sort((a, b) => {
@@ -79,7 +136,7 @@ window.SqlBuilder = (function () {
         });
       const edge = candidates[0];
       if (!edge) {
-        const missing = selected.filter((id) => !visited.has(id)).map((id) => table(id)?.label || id);
+        const missing = graph.allTables.filter((id) => !visited.has(id)).map((id) => table(id)?.label || id);
         errors.push(`Неможливо зв’язати всі вибрані джерела. Без шляху залишилися: ${missing.join(", ")}. Додайте зв’язок у розширеному режимі або приберіть ці таблиці.`);
         return { errors, warnings, ctes, root, joins: [] };
       }
@@ -106,7 +163,9 @@ window.SqlBuilder = (function () {
       }
       visited.add(child);
     }
-    return { errors, warnings: unique(warnings), ctes, root, joins };
+    const hasManyChain = joins.filter((join) => /:N$/.test(join.edge.cardinality)).length >= 2;
+    if (hasManyChain) warnings.push("У страхувальника може бути декілька документів змін та декілька записів КВЕД. Суми T6 можуть розмножитися.");
+    return { ...graph, errors, warnings: unique(warnings), ctes, root, joins, aliases };
   }
 
   function sourceForRoot(root, joins) {
@@ -205,24 +264,30 @@ window.SqlBuilder = (function () {
 
   function build(state) {
     const selected = unique((state.tables || []).filter((id) => table(id))).sort();
-    const aliases = assignAliases(selected);
-    const plan = buildJoinPlan(state, selected, aliases);
+    const plan = buildJoinPlan(state, selected);
+    const aliases = plan.aliases;
     const errors = [...plan.errors];
     const warnings = [...plan.warnings];
-    if (errors.length) return { sql: "", errors, warnings, aliases };
+    if (errors.length) return { sql: "", errors, warnings, aliases, graph: plan };
     const fields = state.fields || [];
     const metrics = (state.metrics || []).map((id) => metricExpression(id, aliases)).filter(Boolean);
     validateCtas(state, selected, fields, metrics, errors);
     const where = buildFilters(state, aliases, errors);
     (SQL_SCHEMA.systemFilters || []).forEach((rule) => {
-      if (rule.tables.every((id) => selected.includes(id))) rule.expressions.forEach((expression) => where.push(replaceAliases(expression, aliases)));
+      if (rule.tables.every((id) => plan.allTables.includes(id))) rule.expressions.forEach((expression) => where.push(replaceAliases(expression, aliases)));
+    });
+    (state.presets || []).forEach((presetId) => {
+      const preset = SQL_SCHEMA.semanticPresets?.find((item) => item.id === presetId);
+      if (!preset) return;
+      if (!preset.tables.every((id) => plan.allTables.includes(id))) errors.push(`Preset «${preset.label}» потребує джерел: ${preset.tables.join(", ")}.`);
+      else preset.filters.forEach((expression) => where.push(replaceAliases(expression, aliases)));
     });
     if (errors.length) return { sql: "", errors: unique(errors), warnings, aliases };
 
     const ctas = ["ctas", "drop_ctas"].includes(state.mode);
     const selectItems = fields.map((item) => fieldExpression(item, aliases, true, ctas));
     metrics.forEach(({ metric, expression }) => selectItems.push(`${expression} AS "${metric.alias}"`));
-    if (!selectItems.length) selectItems.push("*");
+    if (!selectItems.length) selected.forEach((id) => selectItems.push(`${aliases[id]}.*`));
     const rootSource = sourceForRoot(plan.root, plan.joins) || table(plan.root).fullName;
     let from = `FROM ${rootSource} ${aliases[plan.root]}`;
     plan.joins.forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
@@ -244,7 +309,7 @@ window.SqlBuilder = (function () {
       warnings.push(`Увага: DROP TABLE ${state.targetTable.trim()} PURGE безповоротно видалить поточну таблицю перед створенням нової.`);
       sql = `DROP TABLE ${state.targetTable.trim()} PURGE;\n\nCREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
     }
-    return { sql, errors: [], warnings: unique(warnings), aliases };
+    return { sql, errors: [], warnings: unique(warnings), aliases, graph: plan };
   }
 
   function buildSelect(state) {
@@ -256,6 +321,7 @@ window.SqlBuilder = (function () {
   function suggestJoinsForTables(tableIds) {
     const selected = new Set(tableIds);
     return SQL_SCHEMA.joins.filter((edge) => selected.has(edge.left) && selected.has(edge.right)).map((edge) => ({
+      id: edge.id,
       leftTable: edge.left, rightTable: edge.right, conditions: edge.conditions.map((item) => ({ ...item })),
       type: edge.type, cardinality: edge.cardinality, preferredRoot: edge.preferredRoot,
       leftSource: edge.leftSource, rightSource: edge.rightSource, note: edge.note || "",
@@ -264,5 +330,5 @@ window.SqlBuilder = (function () {
     }));
   }
 
-  return { build, buildSelect, suggestJoinsForTables, assignAliases };
+  return { build, buildSelect, suggestJoinsForTables, assignAliases, resolveJoinGraph };
 })();

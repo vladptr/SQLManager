@@ -5,6 +5,7 @@
 <pre id="results">RUNNING</pre>
 <script src="../data/schema.js"></script>
 <script src="../js/sql-builder.js"></script>
+<script src="../js/template-utils.js"></script>
 <script>
   const results = [];
   function test(name, fn) {
@@ -35,8 +36,8 @@
     equal((r.sql.match(/\bJOIN\b/g) || []).length, 2);
   });
   test("непов’язаний граф повертає помилку без SQL", () => {
-    const r = result(state(["insured_person", "mrdorg"]));
-    if (!r.errors.length || r.sql) throw new Error("Очікувалася помилка непов’язаного графа");
+    const graph = SqlBuilder.resolveJoinGraph(["insured_person", "mrdorg"], [], []);
+    if (!graph.errors.length) throw new Error("Очікувалася помилка непов’язаного графа");
   });
   test("складений JOIN APE46–APE45", () => {
     const r = result(state(["sm_ape4_6data", "sm_ape4_5data"]));
@@ -77,6 +78,101 @@
     ];
     const r = result(state(["insured_person_info"], { mode: "ctas", targetTable: "work_result", fields }));
     if (!r.errors.length) throw new Error("Дубльовані аліаси не відхилені");
+  });
+  test("шаблон підставляє період і OTK для T6", () => {
+    const sql = TemplateUtils.apply(
+      "year between {{YEAR_START}} and {{YEAR_END}} month between {{MONTH_START}} and {{MONTH_END}} {{APED46_OTK_CONDITION}}",
+      { yearStart: 2026, yearEnd: 2022, monthStart: 12, monthEnd: 3, otk: "1" }
+    );
+    includes(sql, "year between 2022 and 2026");
+    includes(sql, "month between 03 and 12");
+    includes(sql, "AND pd.aped46_otk = 1");
+  });
+  test("OTK не додається до шаблону для значення будь-яке", () => {
+    const sql = TemplateUtils.apply("x {{APED46_OTK_CONDITION}} y", { otk: "any" });
+    if (sql.includes("aped46_otk")) throw new Error("OTK не мав додаватися");
+  });
+  test("bridge: пакет до анкети A проходить через страхувальника і документ", () => {
+    const r = result(state(["sm_packlabel", "pinsur_ankt_a"]));
+    equal(r.errors.length, 0); equal((r.sql.match(/\bJOIN\b/g) || []).length, 3);
+    includes(r.sql, "ikis_ersp.pinsur_main"); includes(r.sql, "ikis_ersp.pinsur_chng_doc");
+  });
+  test("bridge: T6 до КВЕД проходить правильний повний маршрут", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    ["pinsur_main", "pinsur_chng_doc", "pinsur_kved_hst", "pinsur_kved"].forEach((id) => {
+      if (!r.graph.bridgeTables.includes(id)) throw new Error(`Немає bridge ${id}`);
+    });
+    includes(r.sql, "t6.slb_im = im.im_id"); includes(r.sql, "im.im_id = ih.ih_im");
+    includes(r.sql, "ih.ih_ivh = ivh.ivh_id"); includes(r.sql, "ivh.ivh_id = kv.iv_ivh"); includes(r.sql, "kv.iv_kvd = k.kvd_id");
+    if (/JOIN ikis_ersp\.pinsur_kved kv\s+ON ih\./.test(r.sql)) throw new Error("Знайдено заборонене скорочення документ → КВЕД");
+  });
+  test("bridge: анкета C до КВЕД проходить через документ і pinsur_kved", () => {
+    const r = result(state(["pinsur_ankt_c", "nsi_kved"]));
+    includes(r.sql, "ikis_ersp.pinsur_chng_doc"); includes(r.sql, "ikis_ersp.pinsur_kved_hst"); includes(r.sql, "ikis_ersp.pinsur_kved");
+  });
+  test("немає вигаданого прямого pinsur_main до nsi_kved", () => {
+    const r = result(state(["pinsur_main", "nsi_kved"]));
+    if (/im\.[^\n]+\s*=\s*k\./.test(r.sql)) throw new Error("Знайдено прямий JOIN");
+    equal((r.sql.match(/\bJOIN\b/g) || []).length, 4);
+  });
+  test("анкета C при маршруті від страхувальника є LEFT JOIN", () => {
+    const r = result(state(["pinsur_main", "pinsur_ankt_c"]));
+    includes(r.sql, "LEFT JOIN ikis_ersp.pinsur_ankt_c iac");
+  });
+  test("bridge SQL стабільний при зворотному порядку endpoints", () => {
+    const a = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    const b = result(state(["nsi_kved", "t6_2026_edrpou"]));
+    equal(a.sql, b.sql);
+  });
+  test("bridge-поля не потрапляють у SELECT автоматично", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    const select = r.sql.slice(0, r.sql.indexOf("FROM"));
+    includes(select, "t6.*"); includes(select, "k.*");
+    if (/\b(im|ih|ivh|kv)\.\*/.test(select)) throw new Error("Bridge-поля потрапили у SELECT");
+  });
+  test("кожна таблиця маршруту з’являється у FROM/JOIN один раз", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    ["vasiliuk_u.t6_2026_edrpou", "ikis_ersp.pinsur_main", "ikis_ersp.pinsur_chng_doc", "ikis_ersp.pinsur_kved_hst", "ikis_ersp.pinsur_kved", "ikis_ndi.nsi_kved"].forEach((name) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      equal((r.sql.match(new RegExp(`(?:FROM|JOIN)\\s+${escaped}\\s`, "g")) || []).length, 1, `Дубльовано ${name}`);
+    });
+  });
+  test("preset актуального профілю додає три семантичні фільтри", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], { presets: ["current_insurer_profile"] }));
+    includes(r.sql, "im.im_st IN ('A', 'L')"); includes(r.sql, "ih.ih_st_actual = 'A'"); includes(r.sql, "kv.iv_tp = 'Y'");
+  });
+  test("без preset фільтри актуального профілю відсутні", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    ["im.im_st IN", "ih.ih_st_actual", "kv.iv_tp = 'Y'"].forEach((part) => { if (r.sql.includes(part)) throw new Error(`Зайвий фільтр ${part}`); });
+  });
+  test("history route не змішується з current pointer", () => {
+    const r = result(state(["pinsur_main", "pinsur_chng_doc"]));
+    includes(r.sql, "im.im_id = ih.ih_im");
+    if (r.sql.includes("im.im_ih = ih.ih_id")) throw new Error("Маршрути змішані");
+  });
+  test("ланцюг 1:N до КВЕД попереджає про розмноження сум", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    if (!r.warnings.some((warning) => /Суми T6 можуть розмножитися/.test(warning))) throw new Error("Немає спеціального попередження");
+  });
+
+  test("DDL: APE 4-5 data приєднується до заголовка за пакетом і сторінкою", () => {
+    const r = result(state(["sm_ape4_5data", "sm_ape4_5"]));
+    includes(r.sql, "a45.ape45_slb = d5.aped45_slb");
+    includes(r.sql, "a45.ape45_page = d5.aped45_page");
+  });
+  test("DDL: APE 4-6 data приєднується до заголовка за пакетом і сторінкою", () => {
+    const r = result(state(["sm_ape4_6data", "sm_ape4_6"]));
+    includes(r.sql, "pd.aped46_slb = a46.ape46_slb");
+    includes(r.sql, "pd.aped46_page = a46.ape46_page");
+  });
+  test("маршрут усіх версій КВЕД доступний лише як явний override", () => {
+    const normal = result(state(["pinsur_main", "nsi_kved"]));
+    includes(normal.sql, "im.im_id = ih.ih_im");
+    const explicit = result(state(["pinsur_main", "nsi_kved"], {
+      joins: [{ id: "insurer_to_all_kved_versions", isDefault: true, weight: 1 }]
+    }));
+    includes(explicit.sql, "im.im_id = ivh.ivh_im");
+    if (explicit.sql.includes("ikis_ersp.pinsur_chng_doc")) throw new Error("Явний маршрут усіх версій не повинен додавати документ змін");
   });
 
   const failed = results.filter(x => !x.ok);
