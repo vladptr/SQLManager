@@ -699,6 +699,14 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   function renderQuickFilters() {
     const root = $("#quick-filters");
     root.innerHTML = `<span class="muted">Швидко (з обраних полів):</span>`;
+    const helpBtn = document.createElement("button");
+    helpBtn.type = "button";
+    helpBtn.className = "help-btn";
+    helpBtn.title = "Довідник категорій ЗО";
+    helpBtn.setAttribute("aria-label", "Довідник категорій ЗО");
+    helpBtn.textContent = "?";
+    helpBtn.addEventListener("click", openZoCategoryHelp);
+    root.appendChild(helpBtn);
     const chips = [];
     const categorySource = state.tables.includes("t6_2026_edrpou")
       ? { table: "t6_2026_edrpou", column: "kat_zo" }
@@ -706,8 +714,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         ? { table: "sm_ape4_6data", column: "aped46_zo" }
         : null;
     if (categorySource) {
-      const military = "31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74";
-      const disability = "2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80";
+      const groups = SQL_SCHEMA.zoFilterGroups || {};
+      const military = (groups.military || []).join(", ");
+      const disability = (groups.disability || []).join(", ");
       chips.push(
         { id: "military", label: "Військові", ...categorySource, op: "IN", value: military },
         { id: "civilian", label: "Цивільні", ...categorySource, op: "NOT IN", value: military },
@@ -1141,6 +1150,62 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     return TemplateUtils.apply(sql, getTemplateSettings());
   }
 
+  function zoCategoryTag(code) {
+    const groups = SQL_SCHEMA.zoFilterGroups || {};
+    if ((groups.military || []).indexOf(code) >= 0) return `<span class="zo-cat-tag military">військові</span>`;
+    if ((groups.disability || []).indexOf(code) >= 0) return `<span class="zo-cat-tag disability">інвалідність</span>`;
+    return "";
+  }
+  function renderZoCategoryList(query) {
+    const root = $("#zo-category-list");
+    if (!root) return;
+    const q = String(query || "").trim().toLowerCase();
+    const items = (SQL_SCHEMA.zoCategories || []).filter((item) => {
+      if (!q) return true;
+      return String(item.code).includes(q) || String(item.label || "").toLowerCase().includes(q);
+    });
+    root.innerHTML = items.length
+      ? items.map((item) =>
+          `<div class="zo-cat-row">
+            <span class="zo-cat-code">${item.code}</span>
+            <span class="zo-cat-label">${item.label}</span>
+            ${zoCategoryTag(item.code)}
+          </div>`
+        ).join("")
+      : `<p class="muted">Нічого не знайдено.</p>`;
+  }
+  function openZoCategoryHelp() {
+    const overlay = $("#zo-category-dialog");
+    if (!overlay) return;
+    overlay.hidden = false;
+    renderZoCategoryList($("#zo-category-search") && $("#zo-category-search").value);
+    const search = $("#zo-category-search");
+    if (search) search.focus();
+  }
+  function closeZoCategoryHelp() {
+    const overlay = $("#zo-category-dialog");
+    if (overlay) overlay.hidden = true;
+  }
+  function bindZoCategoryHelp() {
+    const openBtn = $("#zo-category-help");
+    const closeBtn = $("#zo-category-close");
+    const overlay = $("#zo-category-dialog");
+    const search = $("#zo-category-search");
+    if (openBtn) openBtn.addEventListener("click", openZoCategoryHelp);
+    if (closeBtn) closeBtn.addEventListener("click", closeZoCategoryHelp);
+    if (overlay) {
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) closeZoCategoryHelp();
+      });
+    }
+    if (search) {
+      search.addEventListener("input", () => renderZoCategoryList(search.value));
+    }
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && overlay && !overlay.hidden) closeZoCategoryHelp();
+    });
+    renderZoCategoryList("");
+  }
   function bind() {
     $("#btn-next").addEventListener("click", () => go(1));
     $("#btn-back").addEventListener("click", () => go(-1));
@@ -1217,6 +1282,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
     $("#btn-save-preset").addEventListener("click", saveUserPreset);
     $("#btn-reset").addEventListener("click", resetAll);
+    bindZoCategoryHelp();
     $("#search-tables").addEventListener("input", (e) => {
       state.catalogQuery = e.target.value.trim();
       renderCatalog();
