@@ -143,11 +143,14 @@
 
           
           <section class="panel" data-step="4">
-            <h2>Які рядки залишити?</h2>
+            <h2>
+              Які рядки залишити?
+              <button type="button" class="help-btn" id="zo-category-help" title="Довідник категорій ЗО" aria-haspopup="dialog" aria-controls="zo-category-dialog">?</button>
+            </h2>
             <p class="sub">
               Обмеження вибірки: конкретний код, період, «поле містить…», «не
               порожнє» тощо. Без умов — потраплять усі рядки, що підходять за
-              з’єднаннями.
+              з’єднаннями. Знак питання відкриває коди категорій ЗО.
             </p>
             <label class="check-line">
               <input id="filter-latest-person" type="checkbox" />
@@ -238,6 +241,18 @@
     </div>
 
     <div class="toast" id="toast" role="status"></div>
+
+    <div class="help-overlay" id="zo-category-dialog" hidden>
+      <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="zo-category-title">
+        <div class="help-dialog-head">
+          <h3 id="zo-category-title">Категорії застрахованих осіб (ЗО)</h3>
+          <button type="button" class="help-close" id="zo-category-close" aria-label="Закрити">×</button>
+        </div>
+        <p class="help-dialog-note">Код категорії (<code>kat_zo</code> / <code>aped46_zo</code>) і хто це. Швидкі фільтри «Військові» та «Особи з інвалідністю» використовують позначені коди.</p>
+        <input id="zo-category-search" type="search" placeholder="Пошук за номером або назвою…" />
+        <div class="help-dialog-list" id="zo-category-list"></div>
+      </div>
+    </div>
 
     <script>
       window.addEventListener("error", function (event) {
