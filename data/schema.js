@@ -510,6 +510,11 @@ window.SQL_SCHEMA = {
     { id: "insurers_count", label: "Кількість страхувальників", tables: ["t6_2026_edrpou"], expression: "COUNT(DISTINCT {t6_2026_edrpou}.edrpou)", alias: "insurers_count" },
     { id: "rows_count", label: "Кількість рядків", tables: [], expression: "COUNT(*)", alias: "rows_count" },
     { id: "raw_payroll", label: "Фонд оплати (сира Т6 зі сторнуванням)", tables: ["sm_packlabel", "sm_ape4_6data"], expression: "SUM(CASE WHEN {sm_ape4_6data}.aped46_pay_tp IN (3, 5, 7, 9, 12) THEN -ABS({sm_ape4_6data}.aped46_sum) ELSE {sm_ape4_6data}.aped46_sum END)", alias: "payroll_sum" },
+    { id: "avg_salary_month", salaryMetric: true, label: "Середня зарплата за місяць", tables: ["t6_2026_edrpou"], alias: "avg_salary_month", numerator: "сума місячної зарплати", denominator: "кількість активних одиниць за місяць", unit: "грн на місяць", period: "місяць" },
+    { id: "avg_monthly_salary_period", salaryMetric: true, label: "Середньомісячна зарплата за період", tables: ["t6_2026_edrpou"], alias: "avg_monthly_salary_period", numerator: "сума зарплати за вибрані місяці", denominator: "кількість людино-місяців", unit: "грн на місяць", period: "вибраний період" },
+    { id: "avg_monthly_salary_year", salaryMetric: true, label: "Середньомісячна зарплата за рік", tables: ["t6_2026_edrpou"], alias: "avg_monthly_salary_year", numerator: "річний фонд зарплати", denominator: "кількість активних людино-місяців року", unit: "грн на місяць", period: "календарний рік" },
+    { id: "avg_annual_salary", salaryMetric: true, label: "Середньорічна зарплата", tables: ["t6_2026_edrpou"], alias: "avg_annual_salary", numerator: "12 × річний фонд зарплати", denominator: "сума місячної чисельності", unit: "грн на рік", period: "повний календарний рік" },
+    { id: "avg_annual_income_per_person", salaryMetric: true, label: "Середній фактичний річний дохід особи", tables: ["t6_2026_edrpou"], alias: "avg_annual_income_per_person", numerator: "сума річних доходів осіб", denominator: "кількість унікальних осіб року", unit: "грн на рік", period: "рік" },
   ],
   systemFilters: [
     { tables: ["sm_packlabel", "sm_ape4_6data"], expressions: ["{sm_packlabel}.slb_fixed = 'Y'", "{sm_packlabel}.slb_actuality = 'Y'", "{sm_packlabel}.slb_st = 'O'", "{sm_ape4_6data}.aped46_st = 'O'"] },
@@ -552,3 +557,62 @@ window.SQL_SCHEMA = {
 window.SQL_SCHEMA.getTable = function (id) {
   return this.tables.find((t) => t.id === id);
 };
+
+(function mergePhysicalCatalog() {
+  var physical = window.RZO_PHYSICAL_SCHEMA;
+  if (!physical) return;
+  var byFullName = {};
+  window.SQL_SCHEMA.tables.forEach(function (table) {
+    byFullName[String(table.fullName).toUpperCase()] = table;
+  });
+  var idByPhysicalId = {};
+  physical.tables.forEach(function (generated) {
+    var existing = byFullName[generated.fullName];
+    if (existing) {
+      idByPhysicalId[generated.id] = existing.id;
+      existing.schema = generated.schema;
+      existing.name = generated.name;
+      existing.primaryKey = generated.primaryKey;
+      existing.uniqueKeys = generated.uniqueKeys;
+      existing.foreignKeys = generated.foreignKeys;
+      existing.checks = generated.checks;
+      existing.comments = generated.comments;
+      existing.sourceFile = generated.sourceFile;
+      var generatedColumns = {};
+      generated.columns.forEach(function (column) { generatedColumns[column.name.toLowerCase()] = column; });
+      existing.columns = existing.columns.map(function (manualColumn) {
+        var imported = generatedColumns[manualColumn.name.toLowerCase()];
+        return imported ? Object.assign({}, imported, manualColumn) : manualColumn;
+      });
+      generated.columns.forEach(function (column) {
+        if (!existing.columns.some(function (item) { return item.name.toLowerCase() === column.name.toLowerCase(); })) {
+          existing.columns.push(Object.assign({}, column, { name: column.name.toLowerCase(), label: column.comment || column.name }));
+        }
+      });
+      return;
+    }
+    idByPhysicalId[generated.id] = generated.id;
+    window.SQL_SCHEMA.tables.push(Object.assign({}, generated, {
+      group: generated.schema.toLowerCase(),
+      label: generated.comments.table || generated.name,
+      description: generated.comments.table || "Фізична таблиця з " + generated.sourceFile,
+      columns: generated.columns.map(function (column) {
+        return Object.assign({}, column, { name: column.name.toLowerCase(), label: column.comment || column.name });
+      })
+    }));
+  });
+  var physicalEdges = physical.joins.map(function (edge) {
+    return Object.assign({}, edge, {
+      left: idByPhysicalId[edge.left] || edge.left,
+      right: idByPhysicalId[edge.right] || edge.right,
+      conditions: edge.conditions.map(function (condition) {
+        return { leftCol: condition.leftCol.toLowerCase(), rightCol: condition.rightCol.toLowerCase() };
+      }),
+      type: "INNER",
+      isPhysicalForeignKey: true
+    });
+  });
+  window.SQL_SCHEMA.physicalCatalog = physical;
+  window.SQL_SCHEMA.physicalJoins = physicalEdges;
+  window.SQL_SCHEMA.joins = window.SQL_SCHEMA.joins.concat(physicalEdges);
+})();

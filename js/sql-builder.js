@@ -275,6 +275,96 @@ window.SqlBuilder = (function () {
     if (new Set(folded).size !== folded.length) errors.push("Технічні аліаси CTAS мають бути унікальними без урахування регістру.");
   }
 
+  function buildSalaryMetric(state, selected, plan) {
+    const selectedSalaryMetrics = (SQL_SCHEMA.metrics || []).filter((metric) => metric.salaryMetric && (state.metrics || []).includes(metric.id));
+    const salaryMetric = selectedSalaryMetrics[0];
+    if (!salaryMetric) return null;
+    const errors = [...plan.errors];
+    const warnings = [...plan.warnings];
+    if (selectedSalaryMetrics.length > 1 || (state.metrics || []).some((id) => !selectedSalaryMetrics.some((metric) => metric.id === id))) {
+      errors.push("Зарплатний показник будується окремо: виберіть лише один зарплатний показник.");
+    }
+    if (["ctas", "drop_ctas"].includes(state.mode) && !IDENTIFIER.test(String(state.targetTable || "").trim())) {
+      errors.push("Назва CTAS-таблиці має бути коректним Oracle identifier: TABLE або SCHEMA.TABLE.");
+    }
+    if (!selected.includes("t6_2026_edrpou")) errors.push("Зарплатний показник потребує джерело T6_2026_EDRPOU.");
+    const grain = state.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
+    if (grain === "person_month" && selected.some((id) => id !== "t6_2026_edrpou")) {
+      errors.push("Для довідників підприємства або КВЕД виберіть рівень «одна особа в одного страхувальника за місяць».");
+    }
+    const hasHistoryRisk = (plan.joins || []).some((join) => /:N$|N:M/.test(join.edge.cardinality));
+    const currentMode = (state.presets || []).includes("current_insurer_profile");
+    if (hasHistoryRisk && !currentMode) {
+      errors.push("Історичний JOIN може розмножити зарплату. Виберіть semantic mode current/latest/as_of_date або явно підтверджений all_history.");
+    }
+    if (salaryMetric.id === "avg_annual_salary") {
+      const monthFilter = (state.filters || []).find((filter) => filter.table === "t6_2026_edrpou" && filter.column === "aped46_mnth" && filter.op === "BETWEEN");
+      if (!monthFilter || String(monthFilter.value).replace(/\s/g, "") !== "1,12") {
+        errors.push("Середньорічна зарплата вимагає повний календарний рік: місяць BETWEEN 1, 12.");
+      }
+    }
+    const unsupportedFields = (state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && !["year", "aped46_mnth", "kod_zo", "slb_im", "edrpou"].includes(field.column));
+    if (unsupportedFields.length) errors.push("Для зарплатної метрики поля сум і категорій не можна виводити до приведення до місячного зерна.");
+    if (errors.length) return { sql: "", errors: unique(errors), warnings: unique(warnings), aliases: plan.aliases, graph: plan };
+
+    const rawErrors = [];
+    const rawState = Object.assign({}, state, { filters: (state.filters || []).filter((filter) => filter.table === "t6_2026_edrpou") });
+    const rawWhere = buildFilters(rawState, { t6_2026_edrpou: "t6_src" }, rawErrors);
+    if (rawErrors.length) return { sql: "", errors: rawErrors, warnings, aliases: plan.aliases, graph: plan };
+    const populationWhere = state.salaryPopulationRule === "positive_salary" ? "\n  WHERE salary_month > 0" : "";
+    const ctes = [
+      `person_employer_month AS (\n  SELECT t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou,\n         SUM(NVL(t6_src.sum_narah, 0)) AS salary_month,\n         SUM(NVL(t6_src.sum_vrah, 0)) AS salary_counted_month,\n         SUM(NVL(t6_src.sum_narah_vnes, 0)) AS esv_month\n  FROM vasiliuk_u.t6_2026_edrpou t6_src${rawWhere.length ? `\n  WHERE ${rawWhere.join("\n    AND ")}` : ""}\n  GROUP BY t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou\n)`,
+      `person_month AS (\n  SELECT year, aped46_mnth, kod_zo,\n         SUM(salary_month) AS salary_month,\n         SUM(salary_counted_month) AS salary_counted_month,\n         SUM(esv_month) AS esv_month\n  FROM person_employer_month\n  GROUP BY year, aped46_mnth, kod_zo\n)`,
+      `salary_population AS (\n  SELECT *\n  FROM ${grain}${populationWhere}\n)`
+    ];
+    let sourceName = "salary_population";
+    if (salaryMetric.id === "avg_annual_income_per_person") {
+      ctes.push("person_year AS (\n  SELECT year, kod_zo, SUM(salary_month) AS salary_year\n  FROM salary_population\n  GROUP BY year, kod_zo\n)");
+      sourceName = "person_year";
+    }
+    const rootAlias = plan.aliases.t6_2026_edrpou;
+    let from = `FROM ${sourceName} ${rootAlias}`;
+    (plan.joins || []).forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
+    const outerState = Object.assign({}, state, { filters: (state.filters || []).filter((filter) => filter.table !== "t6_2026_edrpou") });
+    const outerWhere = buildFilters(outerState, plan.aliases, errors);
+    (state.presets || []).forEach((presetId) => {
+      const preset = (SQL_SCHEMA.semanticPresets || []).find((item) => item.id === presetId);
+      if (preset && preset.tables.every((id) => plan.allTables.includes(id))) preset.filters.forEach((expression) => outerWhere.push(replaceAliases(expression, plan.aliases)));
+    });
+    let formula = "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)";
+    let mandatory = [];
+    if (salaryMetric.id === "avg_salary_month") mandatory = ["year", "aped46_mnth"];
+    if (salaryMetric.id === "avg_monthly_salary_year" || salaryMetric.id === "avg_annual_salary" || salaryMetric.id === "avg_annual_income_per_person") mandatory = ["year"];
+    if (salaryMetric.id === "avg_annual_salary") formula = "12 * SUM(t6.salary_month) / NULLIF(COUNT(*), 0)";
+    if (salaryMetric.id === "avg_annual_income_per_person") formula = "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)";
+    formula = formula.replace(/\bt6\./g, rootAlias + ".");
+    const dimensionItems = [];
+    const groupBy = [];
+    mandatory.forEach((columnName) => {
+      dimensionItems.push(`${rootAlias}.${columnName} AS "${columnName}"`);
+      groupBy.push(`${rootAlias}.${columnName}`);
+    });
+    (state.fields || []).forEach((field) => {
+      if (field.agg) return;
+      const expression = fieldExpression(field, plan.aliases, false, false);
+      if (!groupBy.includes(expression)) {
+        dimensionItems.push(fieldExpression(field, plan.aliases, true, false));
+        groupBy.push(expression);
+      }
+    });
+    const selectItems = dimensionItems.concat([`${formula} AS "${salaryMetric.alias}"`]);
+    let sql = `WITH\n  ${ctes.map((cte) => cte.replace(/\n/g, "\n  ")).join(",\n  ")}\nSELECT${state.parallel8 ? " /*+ PARALLEL(8) */" : ""}\n       ${selectItems.join(",\n       ")}\n${from}`;
+    if (outerWhere.length) sql += `\n WHERE ${outerWhere.join("\n   AND ")}`;
+    if (groupBy.length) sql += `\n GROUP BY\n       ${groupBy.join(",\n       ")}`;
+    sql += ";";
+    if (state.mode === "ctas") sql = `CREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    if (state.mode === "drop_ctas") {
+      warnings.push(`Увага: DROP TABLE ${state.targetTable.trim()} PURGE безповоротно видалить поточну таблицю.`);
+      sql = `DROP TABLE ${state.targetTable.trim()} PURGE;\n\nCREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    }
+    return { sql, errors: unique(errors), warnings: unique(warnings), aliases: plan.aliases, graph: plan, salaryMetric };
+  }
+
   function build(state) {
     const selected = unique((state.tables || []).filter((id) => table(id))).sort();
     const plan = buildJoinPlan(state, selected);
@@ -282,6 +372,8 @@ window.SqlBuilder = (function () {
     const errors = [...plan.errors];
     const warnings = [...plan.warnings];
     if (errors.length) return { sql: "", errors, warnings, aliases, graph: plan };
+    const salaryResult = buildSalaryMetric(state, selected, plan);
+    if (salaryResult) return salaryResult;
     const fields = state.fields || [];
     const metrics = (state.metrics || []).map((id) => metricExpression(id, aliases)).filter(Boolean);
     validateCtas(state, selected, fields, metrics, errors);

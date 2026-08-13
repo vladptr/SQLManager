@@ -10,9 +10,15 @@
     presets: [],
     latestPersonOnly: false,
     parallel8: false,
+    salaryGrain: "person_month",
+    salaryPopulationRule: "reported",
     mode: "select",
     targetTable: "work_result",
+    catalogMode: "core",
+    catalogQuery: "",
+    expandedCategories: new Set(),
   };
+  let catalogRenderCount = 0;
   const MAX_STEP = 6;
   const TEMPLATE_SCRIPTS = [
     {
@@ -139,7 +145,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   function tLabel(id) {
     const item = SQL_SCHEMA.getTable(id);
-    return (item && item.label) || id;
+    const ui = item && window.SQL_CATALOG_UI && SQL_CATALOG_UI.get(item);
+    return (ui && ui.label) || (item && item.label) || id;
   }
   function cLabel(tableId, col) {
     const t = SQL_SCHEMA.getTable(tableId);
@@ -168,36 +175,109 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       state.step >= MAX_STEP ? "Оновити SQL" : "Далі";
   }
   function renderCatalog() {
+    catalogRenderCount += 1;
     const root = $("#table-catalog");
     root.innerHTML = "";
-    const byGroup = {};
-    SQL_SCHEMA.tables.forEach((t) => {
-      if (!byGroup[t.group]) byGroup[t.group] = [];
-      byGroup[t.group].push(t);
-    });
-    Object.keys(byGroup).forEach((g) => {
+    const fragment = document.createDocumentFragment();
+    const query = state.catalogQuery.trim();
+    if (query) {
+      const matches = SQL_CATALOG_UI.search(query);
       const sec = document.createElement("section");
-      sec.className = "catalog-group";
-      sec.innerHTML = `<h3>${SQL_SCHEMA.schemas[g] || g}</h3>`;
+      sec.className = "catalog-group search-results";
+      sec.innerHTML = `<h3>Результати пошуку — ${matches.length}</h3>`;
       const grid = document.createElement("div");
       grid.className = "card-grid";
-      byGroup[g].forEach((t) => {
-        const card = document.createElement("button");
-        card.type = "button";
-        card.className =
-          "table-card" + (state.tables.includes(t.id) ? " selected" : "");
-        card.innerHTML = `
-          <span class="t-title">${t.label}</span>
-          <span class="t-desc">${t.description || ""}</span>
-          <span class="t-tech">${t.fullName}</span>
-        `;
-        card.addEventListener("click", () => toggleTable(t.id));
-        grid.appendChild(card);
-      });
+      matches.forEach((match) => grid.appendChild(createTableCard(match.table, match)));
       sec.appendChild(grid);
-      root.appendChild(sec);
-    });
+      fragment.appendChild(sec);
+    } else if (state.catalogMode === "core") {
+      const core = SQL_SCHEMA.tables.filter((table) => SQL_CATALOG_UI.get(table).visibility === "core");
+      core.sort(compareCatalogTables);
+      fragment.appendChild(createCatalogSection("Основні джерела", core));
+    } else {
+      const technicalOnly = state.catalogMode === "technical";
+      SQL_CATALOG_UI.categories.forEach((category) => {
+        if ((category.id === "technical") !== technicalOnly) return;
+        const tables = SQL_SCHEMA.tables.filter((table) => {
+          const ui = SQL_CATALOG_UI.get(table);
+          return ui.category === category.id && (technicalOnly || ui.visibility !== "technical");
+        }).sort(compareCatalogTables);
+        if (!tables.length) return;
+        fragment.appendChild(createCategorySection(category, tables));
+      });
+    }
+    root.appendChild(fragment);
+    updateCatalogSelectionState();
+  }
+  function compareCatalogTables(a, b) {
+    const au = SQL_CATALOG_UI.get(a);
+    const bu = SQL_CATALOG_UI.get(b);
+    return (bu.priority - au.priority) || au.label.localeCompare(bu.label, "uk");
+  }
+  function createCatalogSection(title, tables) {
+    const sec = document.createElement("section");
+    sec.className = "catalog-group";
+    sec.innerHTML = `<h3>${title} — ${tables.length}</h3>`;
+    const grid = document.createElement("div");
+    grid.className = "card-grid";
+    const cards = document.createDocumentFragment();
+    tables.forEach((table) => cards.appendChild(createTableCard(table)));
+    grid.appendChild(cards);
+    sec.appendChild(grid);
+    return sec;
+  }
+  function createCategorySection(category, tables) {
+    const sec = document.createElement("section");
+    const expanded = state.expandedCategories.has(category.id);
+    sec.className = "catalog-group catalog-category" + (expanded ? " expanded" : "");
+    sec.dataset.categoryId = category.id;
+    const selected = tables.filter((table) => state.tables.includes(table.id)).length;
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "category-toggle";
+    header.dataset.category = category.id;
+    header.setAttribute("aria-expanded", String(expanded));
+    header.innerHTML = `<span>${category.label}</span><span class="category-count" data-category-count="${category.id}">${tables.length} джерел, вибрано ${selected}</span><span class="category-arrow">⌄</span>`;
+    sec.appendChild(header);
+    if (expanded) {
+      const grid = document.createElement("div");
+      grid.className = "card-grid category-grid";
+      const cards = document.createDocumentFragment();
+      tables.forEach((table) => cards.appendChild(createTableCard(table)));
+      grid.appendChild(cards);
+      sec.appendChild(grid);
+    }
+    return sec;
+  }
+  function createTableCard(table, match) {
+    const ui = SQL_CATALOG_UI.get(table);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.dataset.tableId = table.id;
+    card.className = "table-card" + (state.tables.includes(table.id) ? " selected" : "");
+    const tags = (ui.tags || []).slice(0, 4).map((tag) => `<span>${tag}</span>`).join("");
+    card.innerHTML = `
+      <span class="card-badges"><span class="schema-badge">${ui.schema}</span>${ui.routeBridge ? '<span class="route-badge">Службова таблиця маршруту</span>' : ""}</span>
+      <span class="t-title">${ui.label}</span>
+      <span class="t-desc">${ui.description || table.description || ""}</span>
+      <span class="t-tech">${table.fullName}</span>
+      ${ui.grain ? `<span class="t-grain">Зерно: ${ui.grain}</span>` : ""}
+      ${tags ? `<span class="t-tags">${tags}</span>` : ""}
+      ${match ? `<span class="match-reason">Знайдено: ${match.reason}</span>` : ""}
+    `;
+    return card;
+  }
+  function updateCatalogSelectionState() {
     $("#selected-count").textContent = String(state.tables.length);
+    $$(".table-card[data-table-id]").forEach((card) => {
+      card.classList.toggle("selected", state.tables.includes(card.dataset.tableId));
+    });
+    $$('[data-category-count]').forEach((counter) => {
+      const categoryId = counter.dataset.categoryCount;
+      const tables = SQL_SCHEMA.tables.filter((table) => SQL_CATALOG_UI.get(table).category === categoryId);
+      const selected = tables.filter((table) => state.tables.includes(table.id)).length;
+      counter.textContent = `${tables.length} джерел, вибрано ${selected}`;
+    });
   }
   function toggleTable(id) {
     const i = state.tables.indexOf(id);
@@ -213,7 +293,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       if (o.fieldIndex != null) return o.fieldIndex < state.fields.length;
       return state.tables.includes(o.table);
     });
-    renderCatalog();
+    updateCatalogSelectionState();
     renderSelectedStrip();
     updateSql();
   }
@@ -366,7 +446,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const card = document.createElement("div");
       card.className = "chosen-card";
       const isNum = isNumericColumn(f.table, f.column);
+      const unsafeSalaryColumn = /^(sum_narah|sum_vrah|sum_narah_vnes|aped46_sum|aped46_sum_narah)$/i.test(f.column);
       const ops = SQL_SCHEMA.aggregates
+        .filter((a) => !(unsafeSalaryColumn && a.id === "AVG"))
         .map((a) => {
           return `<option value="${a.id}" ${
             (f.agg || "") === a.id ? "selected" : ""
@@ -456,6 +538,12 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         button.className = "col-chip" + (state.metrics.includes(metric.id) ? " selected" : "");
         button.textContent = metric.label;
         button.addEventListener("click", () => {
+          if (metric.salaryMetric) {
+            state.metrics = state.metrics.filter((id) => {
+              const selected = SQL_SCHEMA.metrics.find((item) => item.id === id);
+              return !selected || !selected.salaryMetric;
+            });
+          }
           const index = state.metrics.indexOf(metric.id);
           if (index >= 0) state.metrics.splice(index, 1); else state.metrics.push(metric.id);
           renderMetrics();
@@ -463,6 +551,18 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         });
         root.appendChild(button);
       });
+    renderSalarySettings();
+  }
+  function renderSalarySettings() {
+    const settings = $("#salary-settings");
+    const metric = SQL_SCHEMA.metrics.find((item) => state.metrics.includes(item.id) && item.salaryMetric);
+    settings.hidden = !metric;
+    if (!metric) return;
+    $$('[name="salary-grain"]').forEach((radio) => { radio.checked = radio.value === state.salaryGrain; });
+    $("#salary-population-rule").value = state.salaryPopulationRule;
+    $("#salary-metric-explain").innerHTML =
+      `<b>Чисельник:</b> ${metric.numerator}. <b>Знаменник:</b> ${metric.denominator}. ` +
+      `<b>Період:</b> ${metric.period}. <b>Одиниця:</b> ${metric.unit}.`;
   }
   function isNumericColumn(tableId, colName) {
     const t = SQL_SCHEMA.getTable(tableId);
@@ -770,6 +870,21 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         const metric = SQL_SCHEMA.metrics.find((item) => item.id === id);
         return (metric && metric.label) || id;
       }).join("; ")}</li>`);
+      const salaryMetric = SQL_SCHEMA.metrics.find((item) => state.metrics.includes(item.id) && item.salaryMetric);
+      if (salaryMetric) {
+        const grainLabel = state.salaryGrain === "person_employer_month"
+          ? "одна особа в одного страхувальника за місяць; роботодавці враховуються окремо"
+          : "одна особа за місяць; зарплата всіх роботодавців підсумована";
+        const populationLabel = state.salaryPopulationRule === "positive_salary"
+          ? "місячна зарплата після агрегації та сторнувань більша нуля"
+          : "є запис у T6 за місяць";
+        lines.push(`<li><b>Чисельник:</b> ${salaryMetric.numerator}</li>`);
+        lines.push(`<li><b>Знаменник:</b> ${salaryMetric.denominator}</li>`);
+        lines.push(`<li><b>Рівень:</b> ${grainLabel}</li>`);
+        lines.push(`<li><b>Період:</b> ${salaryMetric.period}; <b>одиниця:</b> ${salaryMetric.unit}</li>`);
+        lines.push(`<li><b>Активний працівник:</b> ${populationLabel}</li>`);
+        lines.push(`<li><b>Semantic mode:</b> ${state.presets.includes("current_insurer_profile") ? "current" : "не вибрано"}</li>`);
+      }
     }
     if (state.orderBy.length) {
       lines.push(`<li><b>Сортування:</b> ${state.orderBy.length} правил(а)</li>`);
@@ -845,7 +960,11 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       parallel8: false,
       mode: "select",
       targetTable: "work_result",
+      catalogMode: "core",
+      catalogQuery: "",
+      expandedCategories: new Set(),
     });
+    $("#search-tables").value = "";
     renderCatalog();
     renderSelectedStrip();
     renderModeUi();
@@ -946,6 +1065,16 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       state.parallel8 = event.target.checked;
       updateSql();
     });
+    $$('[name="salary-grain"]').forEach((radio) => radio.addEventListener("change", (event) => {
+      state.salaryGrain = event.target.value;
+      renderSalarySettings();
+      updateSql();
+    }));
+    $("#salary-population-rule").addEventListener("change", (event) => {
+      state.salaryPopulationRule = event.target.value;
+      renderSalarySettings();
+      updateSql();
+    });
     $("#btn-add-order").addEventListener("click", () => {
       if (state.fields.length) {
         state.orderBy.push({ fieldIndex: 0, dir: "DESC" });
@@ -982,17 +1111,32 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
     $("#btn-reset").addEventListener("click", resetAll);
     $("#search-tables").addEventListener("input", (e) => {
-      const q = e.target.value.trim().toLowerCase();
-      $$(".table-card").forEach((card) => {
-        card.style.display =
-          !q || card.textContent.toLowerCase().includes(q) ? "" : "none";
+      state.catalogQuery = e.target.value.trim();
+      renderCatalog();
+    });
+    $("#catalog-modes").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-catalog-mode]");
+      if (!button) return;
+      state.catalogMode = button.dataset.catalogMode;
+      if (state.catalogMode === "technical") state.expandedCategories.add("technical");
+      $$("[data-catalog-mode]").forEach((item) => {
+        const active = item.dataset.catalogMode === state.catalogMode;
+        item.classList.toggle("active", active);
+        item.classList.toggle("ghost", !active);
       });
-      $$(".catalog-group").forEach((sec) => {
-        const any = [...sec.querySelectorAll(".table-card")].some(
-          (c) => c.style.display !== "none"
-        );
-        sec.style.display = any ? "" : "none";
-      });
+      renderCatalog();
+    });
+    $("#table-catalog").addEventListener("click", (event) => {
+      const category = event.target.closest("[data-category]");
+      if (category) {
+        const id = category.dataset.category;
+        if (state.expandedCategories.has(id)) state.expandedCategories.delete(id);
+        else state.expandedCategories.add(id);
+        renderCatalog();
+        return;
+      }
+      const card = event.target.closest("[data-table-id]");
+      if (card) toggleTable(card.dataset.tableId);
     });
   }
   function init() {
@@ -1003,6 +1147,26 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       renderModeUi();
       syncSteps();
       updateSql();
+      window.SQLManagerApp = {
+        getCatalogRenderCount: () => catalogRenderCount,
+        getState: () => state,
+        setCatalogMode: (mode) => {
+          state.catalogMode = mode;
+          if (mode === "technical") state.expandedCategories.add("technical");
+          renderCatalog();
+        },
+        setCatalogSearch: (query) => {
+          state.catalogQuery = query || "";
+          $("#search-tables").value = state.catalogQuery;
+          renderCatalog();
+        },
+        toggleCategory: (id) => {
+          if (state.expandedCategories.has(id)) state.expandedCategories.delete(id);
+          else state.expandedCategories.add(id);
+          renderCatalog();
+        },
+        toggleTable,
+      };
     } catch (error) {
       const catalog = document.querySelector("#table-catalog");
       if (catalog) {

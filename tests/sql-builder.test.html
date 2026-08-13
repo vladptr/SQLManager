@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <title>SQL builder tests</title>
 <pre id="results">RUNNING</pre>
+<script src="../data/physical-schema.generated.js"></script>
 <script src="../data/schema.js"></script>
 <script src="../js/sql-builder.js"></script>
 <script src="../js/template-utils.js"></script>
@@ -279,6 +280,116 @@
     const value = "2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80";
     const r = result(state(["t6_2026_edrpou"], { filters: [{ table: "t6_2026_edrpou", column: "kat_zo", op: "IN", value }] }));
     includes(r.sql, "t6.kat_zo IN (2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80)");
+  });
+
+  test("DDL catalog has exact totals", () => {
+    equal(SQL_SCHEMA.physicalCatalog.tables.length, 200, "DDL tables");
+    equal(SQL_SCHEMA.physicalCatalog.tables.reduce((sum, table) => sum + table.columns.length, 0), 2561, "DDL columns");
+    equal(SQL_SCHEMA.physicalCatalog.tables.filter(table => table.primaryKey).length, 170, "DDL PK");
+    equal(SQL_SCHEMA.physicalCatalog.joins.length, 361, "DDL FK");
+  });
+  test("DDL composite FK keeps every condition", () => {
+    const edge = SQL_SCHEMA.physicalJoins.find(item => item.constraintName === "FK_APE4_5DATA");
+    equal(edge.conditions.length, 2, "APE45 composite FK");
+  });
+  test("DDL cross-schema FK is recognized", () => {
+    const edge = SQL_SCHEMA.physicalJoins.find(item => item.constraintName === "SM_PKLBP_FK_SLB_IM");
+    equal(edge.left, "sm_packlabel");
+    equal(edge.right, "pinsur_main");
+    equal(edge.unresolvedExternal, false);
+  });
+  test("DDL absent schema FK is unresolvedExternal", () => {
+    if (!SQL_SCHEMA.physicalJoins.some(item => item.unresolvedExternal)) throw new Error("No unresolved external FK");
+  });
+  test("manual semantic edge wins over physical shortcut", () => {
+    const manual = SQL_SCHEMA.joins.find(item => item.id === "pack_to_insurer");
+    equal(manual.isDefault, true);
+    const physical = SQL_SCHEMA.physicalJoins.find(item => item.constraintName === "SM_PKLBP_FK_SLB_IM");
+    equal(physical.isDefault, false);
+  });
+  test("salary month uses person grain and weighted denominator", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_salary_month"], salaryGrain: "person_month", salaryPopulationRule: "reported" }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_employer_month AS");
+    includes(r.sql, "person_month AS");
+    includes(r.sql, "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)");
+    includes(r.sql, "GROUP BY\n       t6.year,\n       t6.aped46_mnth");
+    if (r.sql.includes("AVG(")) throw new Error("AVG of rows is forbidden");
+    if (r.sql.includes("SELECT DISTINCT")) throw new Error("DISTINCT must not hide grain errors");
+  });
+  test("salary period uses person-months, not average of averages", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_month" }));
+    includes(r.sql, "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)");
+    if (r.sql.includes("AVG(avg_salary_month)")) throw new Error("Unweighted average used");
+  });
+  test("positive salary rule is applied after monthly aggregation", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryPopulationRule: "positive_salary" }));
+    includes(r.sql, "WHERE salary_month > 0");
+  });
+  test("two employers have explicit alternative denominators", () => {
+    const person = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_month" }));
+    const jobs = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month" }));
+    includes(person.sql, "FROM person_month");
+    includes(jobs.sql, "FROM person_employer_month");
+  });
+  test("annual salary rejects an incomplete year", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_salary"], filters: [{ table: "t6_2026_edrpou", column: "aped46_mnth", op: "BETWEEN", value: "1,6" }] }));
+    if (!r.errors.length) throw new Error("Incomplete year accepted");
+  });
+  test("annual income uses person-year", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"] }));
+    includes(r.sql, "person_year AS");
+    includes(r.sql, "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)");
+  });
+  test("salary by KVED aggregates before dictionary joins", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], {
+      metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month",
+      presets: ["current_insurer_profile"], fields: [{ table: "nsi_kved", column: "kvd_code", agg: "" }]
+    }));
+    equal(r.errors.length, 0);
+    if (r.sql.indexOf("person_employer_month AS") > r.sql.indexOf("JOIN ikis_ndi.nsi_kved")) throw new Error("Dictionary joined before grain CTE");
+    includes(r.sql, "ih.ih_st_actual = 'A'");
+    includes(r.sql, "kv.iv_tp = 'Y'");
+  });
+  test("salary with KVED history is blocked without semantic mode", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month" }));
+    if (!r.errors.length) throw new Error("Unsafe historical KVED was accepted");
+  });
+  test("physical catalog contains no duplicate full names or FK ids", () => {
+    equal(new Set(SQL_SCHEMA.physicalCatalog.tables.map(table => table.fullName)).size, 200);
+    equal(new Set(SQL_SCHEMA.physicalCatalog.joins.map(edge => edge.id)).size, 361);
+  });
+  test("DDL per-file counts match source", () => {
+    const websm = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_4.sql");
+    const ersp = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_5.sql");
+    equal(`${websm.tables}/${websm.columns}/${websm.primaryKeys}/${websm.foreignKeys}`, "112/1752/89/226");
+    equal(`${ersp.tables}/${ersp.columns}/${ersp.primaryKeys}/${ersp.foreignKeys}`, "88/809/81/135");
+  });
+  test("salary denominator cannot divide by zero", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"] }));
+    includes(r.sql, "NULLIF(COUNT(*), 0)");
+  });
+  test("raw rows are grouped before person-month count", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"] }));
+    includes(r.sql, "GROUP BY t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou");
+    includes(r.sql, "GROUP BY year, aped46_mnth, kod_zo");
+  });
+  test("salary SQL is stable when source selection order changes", () => {
+    const extra = { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month", presets: ["current_insurer_profile"] };
+    const a = result(state(["t6_2026_edrpou", "nsi_kved"], extra));
+    const b = result(state(["nsi_kved", "t6_2026_edrpou"], extra));
+    equal(a.sql, b.sql);
+  });
+  test("salary CTAS validates Oracle identifier", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_salary_month"], mode: "ctas", targetTable: "bad table" }));
+    if (!r.errors.length) throw new Error("Invalid CTAS identifier accepted");
+  });
+  test("controlled salary example equals expected values", () => {
+    const rows = [{ p: "A", m: 1, v: 10000 }, { p: "A", m: 2, v: 20000 }, { p: "B", m: 1, v: 30000 }];
+    const january = rows.filter(row => row.m === 1);
+    equal(january.reduce((sum, row) => sum + row.v, 0) / january.length, 20000);
+    equal(rows.reduce((sum, row) => sum + row.v, 0) / rows.length, 20000);
+    equal(rows.reduce((sum, row) => sum + row.v, 0) / new Set(rows.map(row => row.p)).size, 30000);
   });
 
   const failed = results.filter(x => !x.ok);

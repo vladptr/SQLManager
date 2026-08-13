@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body,iframe{margin:0;width:100%;height:100%;border:0;background:#0f1419}</style></head>
+<body><iframe id="app" src="../index.html"></iframe><script>
+document.getElementById("app").addEventListener("load", function () {
+  var api = this.contentWindow.SQLManagerApp;
+  var view = location.hash.slice(1);
+  if (view === "category") { api.setCatalogMode("business"); api.toggleCategory("salary_esv"); }
+  if (view === "search") api.setCatalogSearch("APED46_SUM_NARAH");
+  if (view === "technical") api.setCatalogMode("technical");
+});
+</script></body></html>

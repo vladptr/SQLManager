@@ -45,6 +45,11 @@
               />
               <span class="badge">Обрано: <span id="selected-count">0</span></span>
             </div>
+            <div class="catalog-modes" id="catalog-modes" aria-label="Режим каталогу">
+              <button type="button" class="btn catalog-mode active" data-catalog-mode="core">Основні</button>
+              <button type="button" class="btn ghost catalog-mode" data-catalog-mode="business">Усі бізнес-таблиці</button>
+              <button type="button" class="btn ghost catalog-mode" data-catalog-mode="technical">Технічні</button>
+            </div>
             <div class="selected-strip" id="selected-strip"></div>
             <div id="table-catalog"></div>
             <p class="footer-note">
@@ -104,6 +109,18 @@
               <h3 class="block-title">Готові показники</h3>
               <p class="hint">Показники враховують зернистість і не підміняють кількість осіб кількістю рядків.</p>
               <div id="metrics-list" class="quick-filters"></div>
+              <div id="salary-settings" class="semantic-settings" hidden>
+                <strong>Одиниця розрахунку</strong>
+                <label><input type="radio" name="salary-grain" value="person_month" checked /> одна особа за місяць</label>
+                <label><input type="radio" name="salary-grain" value="person_employer_month" /> одна особа в одного страхувальника за місяць</label>
+                <label>Активний працівник
+                  <select id="salary-population-rule">
+                    <option value="reported">є запис у T6 за місяць</option>
+                    <option value="positive_salary">місячна зарплата більша нуля</option>
+                  </select>
+                </label>
+                <div id="salary-metric-explain" class="hint"></div>
+              </div>
             </div>
 
             <div class="result-builder" id="result-builder">
@@ -249,7 +266,9 @@
           " (рядок " + String(event.lineno || "?") + ")</p>";
       });
     </script>
+    <script src="data/physical-schema.generated.js"></script>
     <script src="data/schema.js"></script>
+    <script src="data/catalog-ui.js"></script>
     <script src="js/sql-builder.js"></script>
     <script src="js/template-utils.js"></script>
     <script src="js/app.js"></script>

@@ -184,6 +184,52 @@ textarea:focus {
 .catalog-group {
   margin-bottom: 18px;
 }
+.catalog-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 14px;
+}
+.catalog-mode {
+  padding: 7px 12px;
+  font-size: 0.86rem;
+}
+.category-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(15, 20, 25, 0.55);
+  color: var(--text);
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+.category-toggle:hover,
+.catalog-category.expanded .category-toggle {
+  border-color: rgba(42, 157, 143, 0.55);
+}
+.category-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+.category-arrow {
+  color: var(--accent);
+  font-size: 1.25rem;
+  transition: transform 0.15s ease;
+}
+.catalog-category.expanded .category-arrow {
+  transform: rotate(180deg);
+}
+.category-grid {
+  margin-top: 10px;
+}
 .catalog-group h3 {
   margin: 0 0 10px;
   font-size: 0.85rem;
@@ -260,6 +306,49 @@ textarea:focus {
 .muted {
   color: var(--muted);
 }
+.card-badges,
+.t-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.schema-badge,
+.route-badge,
+.t-tags span {
+  width: max-content;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+.route-badge {
+  color: var(--accent-2);
+  background: rgba(233, 196, 106, 0.1);
+}
+.t-grain,
+.match-reason {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.match-reason {
+  margin-top: 3px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.search-results > h3 {
+  color: var(--accent);
+}
+@media (max-width: 620px) {
+  .category-toggle {
+    grid-template-columns: 1fr auto;
+  }
+  .category-count {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
 .col-chip.selected {
   border-color: var(--accent);
   background: rgba(42, 157, 143, 0.18);
@@ -276,6 +365,16 @@ textarea:focus {
 .sql-status:not(:empty) { display: block; }
 .sql-status p { margin: 0 0 6px; }
 .sql-status p:last-child { margin-bottom: 0; }
+.semantic-settings {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.semantic-settings[hidden] { display: none; }
+.semantic-settings label { display: flex; gap: 8px; align-items: center; }
 .sql-status.warning { color: var(--accent-2); background: rgba(233, 196, 106, 0.08); border: 1px solid rgba(233, 196, 106, 0.3); }
 .sql-status.error { color: #ffb4a2; background: rgba(231, 111, 81, 0.1); border: 1px solid rgba(231, 111, 81, 0.35); }
 .hint {
