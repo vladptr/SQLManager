@@ -538,14 +538,17 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         button.className = "col-chip" + (state.metrics.includes(metric.id) ? " selected" : "");
         button.textContent = metric.label;
         button.addEventListener("click", () => {
+          const wasSelected = state.metrics.includes(metric.id);
           if (metric.salaryMetric) {
             state.metrics = state.metrics.filter((id) => {
               const selected = SQL_SCHEMA.metrics.find((item) => item.id === id);
               return !selected || !selected.salaryMetric;
             });
           }
-          const index = state.metrics.indexOf(metric.id);
-          if (index >= 0) state.metrics.splice(index, 1); else state.metrics.push(metric.id);
+          if (!wasSelected) {
+            const index = state.metrics.indexOf(metric.id);
+            if (index >= 0) state.metrics.splice(index, 1); else state.metrics.push(metric.id);
+          }
           renderMetrics();
           updateSql();
         });
@@ -824,20 +827,22 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     return row;
   }
   function updateSql() {
-    const result = SqlBuilder.build(state);
+    const sqlState = SQLWizardState.forStep(state, state.step);
+    const result = SqlBuilder.build(sqlState);
     $("#sql-out").value = result.sql || result.errors.map((error) => `-- ПОМИЛКА: ${error}`).join("\n");
     const status = $("#sql-status");
     status.className = "sql-status" + (result.errors.length ? " error" : result.warnings.length ? " warning" : "");
     status.innerHTML = result.errors.length
       ? result.errors.map((error) => `<p><strong>Помилка:</strong> ${error}</p>`).join("")
       : result.warnings.map((warning) => `<p><strong>Увага:</strong> ${warning}</p>`).join("");
-    $("#sql-explain").innerHTML = buildExplain(result);
+    $("#sql-explain").innerHTML = buildExplain(result, sqlState);
   }
-  function buildExplain(result) {
-    if (!state.tables.length) return "<p>Поки нічого не зібрано.</p>";
+  function buildExplain(result, sqlState) {
+    const current = sqlState || state;
+    if (!current.tables.length) return "<p>Поки нічого не зібрано.</p>";
     const lines = [];
     lines.push(
-      `<li><b>Джерела:</b> ${state.tables.map(tLabel).join("; ")}</li>`
+      `<li><b>Джерела:</b> ${current.tables.map(tLabel).join("; ")}</li>`
     );
     const resolvedEdges = (result && result.graph && result.graph.edges) || [];
     if (resolvedEdges.length) {
@@ -851,9 +856,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
           .join("; ")}</li>`
       );
     }
-    if (state.fields.length) {
+    if (current.fields.length) {
       lines.push(
-        `<li><b>У результаті:</b> ${state.fields
+        `<li><b>У результаті:</b> ${current.fields
           .map((f) => {
             const a = f.agg
               ? ((SQL_SCHEMA.aggregates.find((x) => x.id === f.agg) || {}).label || "") + " — "
@@ -865,17 +870,17 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     } else {
       lines.push(`<li><b>У результаті:</b> усі поля</li>`);
     }
-    if (state.metrics.length) {
-      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => {
+    if (current.metrics.length) {
+      lines.push(`<li><b>Показники:</b> ${current.metrics.map((id) => {
         const metric = SQL_SCHEMA.metrics.find((item) => item.id === id);
         return (metric && metric.label) || id;
       }).join("; ")}</li>`);
-      const salaryMetric = SQL_SCHEMA.metrics.find((item) => state.metrics.includes(item.id) && item.salaryMetric);
+      const salaryMetric = SQL_SCHEMA.metrics.find((item) => current.metrics.includes(item.id) && item.salaryMetric);
       if (salaryMetric) {
-        const grainLabel = state.salaryGrain === "person_employer_month"
+        const grainLabel = current.salaryGrain === "person_employer_month"
           ? "одна особа в одного страхувальника за місяць; роботодавці враховуються окремо"
           : "одна особа за місяць; зарплата всіх роботодавців підсумована";
-        const populationLabel = state.salaryPopulationRule === "positive_salary"
+        const populationLabel = current.salaryPopulationRule === "positive_salary"
           ? "місячна зарплата після агрегації та сторнувань більша нуля"
           : "є запис у T6 за місяць";
         lines.push(`<li><b>Чисельник:</b> ${salaryMetric.numerator}</li>`);
@@ -883,15 +888,15 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         lines.push(`<li><b>Рівень:</b> ${grainLabel}</li>`);
         lines.push(`<li><b>Період:</b> ${salaryMetric.period}; <b>одиниця:</b> ${salaryMetric.unit}</li>`);
         lines.push(`<li><b>Активний працівник:</b> ${populationLabel}</li>`);
-        lines.push(`<li><b>Semantic mode:</b> ${state.presets.includes("current_insurer_profile") ? "current" : "не вибрано"}</li>`);
+        lines.push(`<li><b>Semantic mode:</b> ${current.presets.includes("current_insurer_profile") ? "current" : "не вибрано"}</li>`);
       }
     }
-    if (state.orderBy.length) {
-      lines.push(`<li><b>Сортування:</b> ${state.orderBy.length} правил(а)</li>`);
+    if (current.orderBy.length) {
+      lines.push(`<li><b>Сортування:</b> ${current.orderBy.length} правил(а)</li>`);
     }
-    if (state.filters.length) {
+    if (current.filters.length) {
       lines.push(
-        `<li><b>Фільтри:</b> ${state.filters
+        `<li><b>Фільтри:</b> ${current.filters
           .map((f) => {
             const op =
               (SQL_SCHEMA.operators.find((o) => o.id === f.op) || {}).label || f.op;
@@ -901,8 +906,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       );
     }
     const modeLabel =
-      (SQL_SCHEMA.outputModes.find((m) => m.id === state.mode) || {}).label ||
-      state.mode;
+      (SQL_SCHEMA.outputModes.find((m) => m.id === current.mode) || {}).label ||
+      current.mode;
     lines.push(`<li><b>Дія:</b> ${modeLabel}</li>`);
     return `<ul>${lines.join("")}</ul>`;
   }
@@ -923,6 +928,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     }
     onStepEnter();
     syncSteps();
+    updateSql();
   }
   function onStepEnter() {
     if (state.step === 2) {
@@ -934,7 +940,6 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       renderOrder();
     }
     if (state.step === 4) renderFilters();
-    if (state.step === 5) updateSql();
     if (state.step === 6) renderTemplates();
   }
   function goToStep(n) {
@@ -945,6 +950,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     state.step = n;
     onStepEnter();
     syncSteps();
+    updateSql();
   }
   function resetAll() {
     Object.assign(state, {
@@ -958,6 +964,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       presets: [],
       latestPersonOnly: false,
       parallel8: false,
+      salaryGrain: "person_month",
+      salaryPopulationRule: "reported",
       mode: "select",
       targetTable: "work_result",
       catalogMode: "core",
@@ -976,6 +984,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     notify("Очищено");
   }
   function renderTemplates() {
+    renderSavedPresets();
     const root = $("#templates-list");
     root.innerHTML = TEMPLATE_SCRIPTS.map(
       (tpl, idx) => `
@@ -994,6 +1003,103 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     root.querySelectorAll("[data-copy]").forEach((btn) => {
       btn.addEventListener("click", () => copyTemplate(Number(btn.dataset.copy)));
     });
+  }
+  function safeText(value) {
+    return String(value).replace(/[&<>"']/g, function (character) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character];
+    });
+  }
+  function renderSavedPresets() {
+    const root = $("#saved-presets-list");
+    if (!root) return;
+    const items = SQLPresetStore.list(localStorage).sort(function (a, b) { return b.updatedAt.localeCompare(a.updatedAt); });
+    if (!items.length) {
+      root.innerHTML = '<p class="hint muted-box">Ще немає збережених пресетів.</p>';
+      return;
+    }
+    root.innerHTML = items.map(function (preset) {
+      const tables = (preset.state.tables || []).map(tLabel).join("; ");
+      return `<article class="preset-card">
+        <strong>${safeText(preset.name)}</strong>
+        <span>${safeText(tables || "Без джерел")}</span>
+        <div class="preset-actions">
+          <button type="button" class="btn" data-user-load="${safeText(preset.id)}">Завантажити</button>
+          <button type="button" class="btn danger" data-user-delete="${safeText(preset.id)}">Видалити</button>
+        </div>
+      </article>`;
+    }).join("");
+    root.querySelectorAll("[data-user-load]").forEach(function (button) {
+      button.addEventListener("click", function () { loadUserPreset(button.dataset.userLoad); });
+    });
+    root.querySelectorAll("[data-user-delete]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        if (!window.confirm("Видалити цей пресет?")) return;
+        SQLPresetStore.remove(localStorage, button.dataset.userDelete);
+        renderSavedPresets();
+        notify("Пресет видалено");
+      });
+    });
+  }
+  function saveUserPreset() {
+    if (!state.tables.length) {
+      notify("Спочатку налаштуйте запит", false);
+      return;
+    }
+    const name = window.prompt("Назва пресета:", "Мій звіт");
+    if (name == null) return;
+    try {
+      SQLPresetStore.save(localStorage, name, state);
+      if (state.step === 6) renderSavedPresets();
+      notify("Пресет збережено");
+    } catch (error) {
+      notify(error.message || "Не вдалося зберегти пресет", false);
+    }
+  }
+  function loadUserPreset(id) {
+    const preset = SQLPresetStore.get(localStorage, id);
+    if (!preset) {
+      notify("Пресет не знайдено", false);
+      renderSavedPresets();
+      return;
+    }
+    const saved = preset.state || {};
+    const tables = (saved.tables || []).filter(function (tableId) { return !!SQL_SCHEMA.getTable(tableId); });
+    const hasColumn = function (tableId, columnName) {
+      const table = SQL_SCHEMA.getTable(tableId);
+      return !!(table && table.columns.some(function (column) { return column.name === columnName; }));
+    };
+    state.tables = tables;
+    state.joins = Array.isArray(saved.joins) ? saved.joins : [];
+    state.fields = (saved.fields || []).filter(function (field) { return tables.includes(field.table) && hasColumn(field.table, field.column); });
+    state.filters = (saved.filters || []).filter(function (filter) { return tables.includes(filter.table) && hasColumn(filter.table, filter.column); });
+    state.orderBy = (saved.orderBy || []).filter(function (order) {
+      return order.fieldIndex != null ? order.fieldIndex < state.fields.length : tables.includes(order.table) && hasColumn(order.table, order.column);
+    });
+    state.metrics = (saved.metrics || []).filter(function (id) {
+      const metric = SQL_SCHEMA.metrics.find(function (item) { return item.id === id; });
+      return metric && metric.tables.every(function (tableId) { return tables.includes(tableId); });
+    });
+    state.presets = (saved.presets || []).filter(function (id) { return SQL_SCHEMA.semanticPresets.some(function (item) { return item.id === id; }); });
+    state.latestPersonOnly = saved.latestPersonOnly === true;
+    state.parallel8 = saved.parallel8 === true;
+    state.salaryGrain = saved.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
+    state.salaryPopulationRule = saved.salaryPopulationRule === "positive_salary" ? "positive_salary" : "reported";
+    state.mode = SQL_SCHEMA.outputModes.some(function (mode) { return mode.id === saved.mode; }) ? saved.mode : "select";
+    state.targetTable = String(saved.targetTable || "work_result");
+    $("#mode-select").value = state.mode;
+    $("#target-table").value = state.targetTable;
+    $("#preset-current-insurer").checked = state.presets.includes("current_insurer_profile");
+    $("#filter-latest-person").checked = state.latestPersonOnly;
+    $("#use-parallel-8").checked = state.parallel8;
+    renderCatalog();
+    renderSelectedStrip();
+    renderJoins();
+    renderModeUi();
+    renderFields();
+    renderOrder();
+    renderFilters();
+    updateSql();
+    notify("Пресет завантажено");
   }
   function loadTemplate(index) {
     const tpl = TEMPLATE_SCRIPTS[index];
@@ -1109,6 +1215,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       URL.revokeObjectURL(a.href);
       notify("Збережено");
     });
+    $("#btn-save-preset").addEventListener("click", saveUserPreset);
     $("#btn-reset").addEventListener("click", resetAll);
     $("#search-tables").addEventListener("input", (e) => {
       state.catalogQuery = e.target.value.trim();

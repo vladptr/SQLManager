@@ -107,7 +107,7 @@
 
             <div class="block">
               <h3 class="block-title">Готові показники</h3>
-              <p class="hint">Показники враховують зернистість і не підміняють кількість осіб кількістю рядків.</p>
+              <p class="hint">Показники враховують зернистість і не підміняють кількість осіб кількістю рядків. Щоб прибрати вибраний показник, натисніть його кнопку повторно.</p>
               <div id="metrics-list" class="quick-filters"></div>
               <div id="salary-settings" class="semantic-settings" hidden>
                 <strong>Одиниця розрахунку</strong>
@@ -223,6 +223,9 @@
                 </label>
               </div>
             </div>
+            <h3 class="block-title saved-presets-title">Мої пресети конструктора</h3>
+            <p class="hint">Зберігаються лише у цьому браузері на цьому комп’ютері.</p>
+            <div id="saved-presets-list" class="presets"></div>
             <div id="templates-list" class="presets"></div>
           </section>
 
@@ -244,6 +247,9 @@
             <button type="button" class="btn" id="btn-copy">Копіювати</button>
             <button type="button" class="btn ghost" id="btn-download">
               Зберегти .sql
+            </button>
+            <button type="button" class="btn ghost" id="btn-save-preset">
+              Зберегти пресет
             </button>
             <button type="button" class="btn secondary" id="btn-reset">
               Почати спочатку
@@ -271,6 +277,8 @@
     <script src="data/catalog-ui.js"></script>
     <script src="js/sql-builder.js"></script>
     <script src="js/template-utils.js"></script>
+    <script src="js/preset-store.js"></script>
+    <script src="js/wizard-state.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

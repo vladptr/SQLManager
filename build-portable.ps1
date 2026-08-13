@@ -10,7 +10,7 @@ $html = [IO.File]::ReadAllText($indexPath, [Text.Encoding]::UTF8)
 $css = [IO.File]::ReadAllText((Join-Path $projectRoot "css\styles.css"), [Text.Encoding]::UTF8)
 $html = $html.Replace('<link rel="stylesheet" href="css/styles.css" />', "<style>`n$css`n</style>")
 
-$scripts = @("data\physical-schema.generated.js", "data\schema.js", "data\catalog-ui.js", "js\sql-builder.js", "js\template-utils.js", "js\app.js")
+$scripts = @("data\physical-schema.generated.js", "data\schema.js", "data\catalog-ui.js", "js\sql-builder.js", "js\template-utils.js", "js\preset-store.js", "js\wizard-state.js", "js\app.js")
 foreach ($relativePath in $scripts) {
   $source = [IO.File]::ReadAllText((Join-Path $projectRoot $relativePath), [Text.Encoding]::UTF8)
   $htmlPath = $relativePath.Replace("\", "/")

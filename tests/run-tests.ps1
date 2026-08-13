@@ -4,6 +4,8 @@ $runtimeFiles = @(
   "$PSScriptRoot\..\data\catalog-ui.js",
   "$PSScriptRoot\..\js\sql-builder.js",
   "$PSScriptRoot\..\js\template-utils.js",
+  "$PSScriptRoot\..\js\preset-store.js",
+  "$PSScriptRoot\..\js\wizard-state.js",
   "$PSScriptRoot\..\js\app.js"
 )
 foreach ($runtimeFile in $runtimeFiles) {
@@ -14,8 +16,8 @@ foreach ($runtimeFile in $runtimeFiles) {
 }
 $importA = Join-Path $env:TEMP ("rzo-physical-a-" + [guid]::NewGuid() + ".js")
 $importB = Join-Path $env:TEMP ("rzo-physical-b-" + [guid]::NewGuid() + ".js")
-& "$PSScriptRoot\..\tools\import-ddl.ps1" -InputFiles @("rzo_schema_4.sql", "rzo_schema_5.sql") -OutputFile $importA | Out-Null
-& "$PSScriptRoot\..\tools\import-ddl.ps1" -InputFiles @("rzo_schema_5.sql", "rzo_schema_4.sql") -OutputFile $importB | Out-Null
+& "$PSScriptRoot\..\tools\import-ddl.ps1" -InputFiles @("rzo_schema_4.sql", "rzo_schema_5.sql", "rzo_schema_6.sql", "rzo_schema_7.sql") -OutputFile $importA | Out-Null
+& "$PSScriptRoot\..\tools\import-ddl.ps1" -InputFiles @("rzo_schema_7.sql", "rzo_schema_6.sql", "rzo_schema_5.sql", "rzo_schema_4.sql") -OutputFile $importB | Out-Null
 $hashA = (Get-FileHash -Algorithm SHA256 -LiteralPath $importA).Hash
 $hashB = (Get-FileHash -Algorithm SHA256 -LiteralPath $importB).Hash
 Remove-Item -LiteralPath $importA, $importB -Force

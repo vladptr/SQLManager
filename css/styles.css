@@ -387,6 +387,9 @@ textarea:focus {
   gap: 10px;
   margin-bottom: 18px;
 }
+.saved-presets-title {
+  margin-top: 20px;
+}
 .preset-card {
   text-align: left;
   border: 1px dashed rgba(233, 196, 106, 0.35);

@@ -1,5 +1,5 @@
 param(
-  [string[]]$InputFiles = @("rzo_schema_4.sql", "rzo_schema_5.sql"),
+  [string[]]$InputFiles = @("rzo_schema_4.sql", "rzo_schema_5.sql", "rzo_schema_6.sql", "rzo_schema_7.sql"),
   [string]$OutputFile = "data/physical-schema.generated.js"
 )
 
@@ -135,6 +135,7 @@ foreach ($relativeFile in ($InputFiles | Sort-Object)) {
 
 $orderedTables = @($tables.Values | Sort-Object fullName)
 $joins = New-Object System.Collections.Generic.List[object]
+$joinIds = New-Object System.Collections.Generic.HashSet[string]
 foreach ($table in $orderedTables) {
   foreach ($fk in $table.foreignKeys) {
     $unresolved = -not $tables.ContainsKey($fk.referencedTable)
@@ -142,8 +143,10 @@ foreach ($table in $orderedTables) {
     $conditions = for ($i = 0; $i -lt $fk.columns.Count; $i++) {
       [ordered]@{ leftCol = $fk.columns[$i]; rightCol = $fk.referencedColumns[$i] }
     }
+    $joinId = "fk:$($table.fullName):$($fk.name)".ToLowerInvariant()
+    if (-not $joinIds.Add($joinId)) { continue }
     $joins.Add([ordered]@{
-      id = "fk:$($table.fullName):$($fk.name)".ToLowerInvariant(); left = $table.id; right = $fk.referencedTable.ToLowerInvariant()
+      id = $joinId; left = $table.id; right = $fk.referencedTable.ToLowerInvariant()
       conditions = @($conditions); cardinality = 'N:1'; constraintName = $fk.name; physical = $true
       isDefault = $false; weight = 100; unresolvedExternal = $unresolved; sourceFile = $fk.sourceFile
     })

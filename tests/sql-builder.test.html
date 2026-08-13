@@ -7,6 +7,8 @@
 <script src="../data/schema.js"></script>
 <script src="../js/sql-builder.js"></script>
 <script src="../js/template-utils.js"></script>
+<script src="../js/preset-store.js"></script>
+<script src="../js/wizard-state.js"></script>
 <script>
   const results = [];
   function test(name, fn) {
@@ -30,6 +32,57 @@
     const a = result(state(["t6_2026_edrpou", "insured_person_info"]));
     const b = result(state(["insured_person_info", "t6_2026_edrpou"]));
     equal(a.sql, b.sql);
+  });
+  test("user preset stores only constructor configuration", () => {
+    const data = {};
+    const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    const saved = SQLPresetStore.save(storage, "Звіт КВЕД", {
+      step: 5, tables: ["t6_2026_edrpou"], metrics: ["payroll"], filters: [], expandedCategories: new Set(["x"]), parallel8: true
+    });
+    equal(saved.name, "Звіт КВЕД");
+    equal(saved.state.tables[0], "t6_2026_edrpou");
+    equal(saved.state.parallel8, true);
+    if ("step" in saved.state || "expandedCategories" in saved.state) throw new Error("Transient UI state was stored");
+  });
+  test("user preset with the same name is updated instead of duplicated", () => {
+    const data = {};
+    const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    const first = SQLPresetStore.save(storage, "Мій звіт", { tables: ["t6_2026_edrpou"], metrics: ["payroll"] });
+    const second = SQLPresetStore.save(storage, "мій звіт", { tables: ["t6_2026_edrpou"], metrics: ["contributions"] });
+    equal(first.id, second.id);
+    equal(SQLPresetStore.list(storage).length, 1);
+    equal(SQLPresetStore.get(storage, first.id).state.metrics[0], "contributions");
+  });
+  test("damaged local preset storage does not break the constructor", () => {
+    const storage = { getItem: () => "{damaged", setItem: () => {} };
+    equal(SQLPresetStore.list(storage).length, 0);
+  });
+  test("user preset can be deleted", () => {
+    const data = {};
+    const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    const saved = SQLPresetStore.save(storage, "Тимчасовий", { tables: ["t6_2026_edrpou"] });
+    equal(SQLPresetStore.remove(storage, saved.id), true);
+    equal(SQLPresetStore.list(storage).length, 0);
+  });
+  test("wizard preview hides later-step settings without deleting them", () => {
+    const full = {
+      tables: ["t6_2026_edrpou"], joins: [{ id: "override" }],
+      fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }],
+      metrics: ["payroll"], filters: [{ table: "t6_2026_edrpou", column: "year", op: "=", value: 2026 }],
+      orderBy: [{ fieldIndex: 0, dir: "ASC" }], presets: ["current_insurer_profile"],
+      parallel8: true, mode: "ctas", targetTable: "REPORT_1"
+    };
+    const sources = SQLWizardState.forStep(full, 1);
+    equal(sources.fields.length, 0);
+    equal(sources.filters.length, 0);
+    equal(sources.orderBy.length, 0);
+    equal(sources.mode, "select");
+    equal(full.fields.length, 1, "Full state fields must survive back navigation");
+    equal(full.filters.length, 1, "Full state filters must survive back navigation");
+    const filters = SQLWizardState.forStep(full, 4);
+    equal(filters.fields.length, 1);
+    equal(filters.filters.length, 1);
+    equal(filters.orderBy.length, 1);
   });
   test("три таблиці з проміжним зв’язком", () => {
     const r = result(state(["pinsur_ankt_a", "pinsur_main", "pinsur_chng_doc"]));
@@ -283,10 +336,10 @@
   });
 
   test("DDL catalog has exact totals", () => {
-    equal(SQL_SCHEMA.physicalCatalog.tables.length, 200, "DDL tables");
-    equal(SQL_SCHEMA.physicalCatalog.tables.reduce((sum, table) => sum + table.columns.length, 0), 2561, "DDL columns");
-    equal(SQL_SCHEMA.physicalCatalog.tables.filter(table => table.primaryKey).length, 170, "DDL PK");
-    equal(SQL_SCHEMA.physicalCatalog.joins.length, 361, "DDL FK");
+    equal(SQL_SCHEMA.physicalCatalog.tables.length, 289, "DDL tables");
+    equal(SQL_SCHEMA.physicalCatalog.tables.reduce((sum, table) => sum + table.columns.length, 0), 3481, "DDL columns");
+    equal(SQL_SCHEMA.physicalCatalog.tables.filter(table => table.primaryKey).length, 255, "DDL PK");
+    equal(SQL_SCHEMA.physicalCatalog.joins.length, 499, "unique DDL FK");
   });
   test("DDL composite FK keeps every condition", () => {
     const edge = SQL_SCHEMA.physicalJoins.find(item => item.constraintName === "FK_APE4_5DATA");
@@ -322,6 +375,20 @@
     includes(r.sql, "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)");
     if (r.sql.includes("AVG(avg_salary_month)")) throw new Error("Unweighted average used");
   });
+  test("salary report appends ORDER BY for selected dimensions", () => {
+    const fields = [
+      { table: "t6_2026_edrpou", column: "reg", agg: "" },
+      { table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }
+    ];
+    const r = result(state(["t6_2026_edrpou"], {
+      fields,
+      metrics: ["payroll", "avg_monthly_salary_period"],
+      salaryGrain: "person_employer_month",
+      orderBy: [{ fieldIndex: 0, dir: "ASC" }, { fieldIndex: 1, dir: "DESC" }]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "ORDER BY t6.reg ASC, t6.aped46_mnth DESC");
+  });
   test("positive salary rule is applied after monthly aggregation", () => {
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryPopulationRule: "positive_salary" }));
     includes(r.sql, "WHERE salary_month > 0");
@@ -351,19 +418,60 @@
     includes(r.sql, "ih.ih_st_actual = 'A'");
     includes(r.sql, "kv.iv_tp = 'Y'");
   });
+  test("monthly report combines payroll, ESV and average salary by KVED region and month", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], {
+      metrics: ["payroll", "contributions", "avg_monthly_salary_period"],
+      salaryGrain: "person_employer_month",
+      presets: ["current_insurer_profile"],
+      fields: [
+        { table: "t6_2026_edrpou", column: "reg", agg: "" },
+        { table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" },
+        { table: "nsi_kved", column: "kvd_code", agg: "" }
+      ]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, 'SUM(t6.salary_month) AS "payroll_sum"');
+    includes(r.sql, 'SUM(t6.esv_month) AS "esv_sum"');
+    includes(r.sql, 'SUM(t6.salary_month) / NULLIF(COUNT(*), 0) AS "avg_monthly_salary_period"');
+    includes(r.sql, "t6.reg");
+    includes(r.sql, "t6.aped46_mnth");
+    includes(r.sql, "k.kvd_code");
+    if (r.sql.indexOf("person_employer_month AS") > r.sql.indexOf("JOIN ikis_ndi.nsi_kved")) throw new Error("Additive metrics joined before safe grain");
+  });
   test("salary with KVED history is blocked without semantic mode", () => {
     const r = result(state(["t6_2026_edrpou", "nsi_kved"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month" }));
     if (!r.errors.length) throw new Error("Unsafe historical KVED was accepted");
   });
   test("physical catalog contains no duplicate full names or FK ids", () => {
-    equal(new Set(SQL_SCHEMA.physicalCatalog.tables.map(table => table.fullName)).size, 200);
-    equal(new Set(SQL_SCHEMA.physicalCatalog.joins.map(edge => edge.id)).size, 361);
+    equal(new Set(SQL_SCHEMA.physicalCatalog.tables.map(table => table.fullName)).size, 289);
+    equal(new Set(SQL_SCHEMA.physicalCatalog.joins.map(edge => edge.id)).size, 499);
   });
   test("DDL per-file counts match source", () => {
     const websm = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_4.sql");
     const ersp = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_5.sql");
+    const ndi = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_6.sql");
+    const personAndKatottg = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_7.sql");
     equal(`${websm.tables}/${websm.columns}/${websm.primaryKeys}/${websm.foreignKeys}`, "112/1752/89/226");
     equal(`${ersp.tables}/${ersp.columns}/${ersp.primaryKeys}/${ersp.foreignKeys}`, "88/809/81/135");
+    equal(`${ndi.tables}/${ndi.columns}/${ndi.primaryKeys}/${ndi.foreignKeys}`, "59/576/56/61");
+    equal(`${personAndKatottg.tables}/${personAndKatottg.columns}/${personAndKatottg.primaryKeys}/${personAndKatottg.foreignKeys}`, "30/344/29/102");
+  });
+  test("DDL 6/7 resolve insurer, KVED, region and person physical links", () => {
+    const ids = new Set(SQL_SCHEMA.physicalJoins.filter(edge => !edge.unresolvedExternal).map(edge => edge.id));
+    [
+      "fk:ikis_ersp.pinsur_ankt_a:fk_ian_ic",
+      "fk:ikis_ersp.pinsur_ankt_c:fk_iac_ru",
+      "fk:ikis_ersp.pinsur_kved:fk_iv_kvd",
+      "fk:ikis_websm.sm_ape4_5data:fk_ape45_pel",
+      "fk:ikis_websm.sm_ape4_6data:fk_ape46_pel"
+    ].forEach(id => { if (!ids.has(id)) throw new Error(`Missing resolved FK: ${id}`); });
+  });
+  test("KATOTTG hierarchy and ZO category are imported from DDL 7", () => {
+    const katottg = SQL_SCHEMA.tables.find(table => table.fullName.toUpperCase() === "IKIS_NDI.NDI_KATOTTG");
+    const zo = SQL_SCHEMA.tables.find(table => table.fullName.toUpperCase() === "IKIS_NDI.NSI_ZO_CAT");
+    if (!katottg || !zo) throw new Error("DDL 7 dictionaries missing");
+    equal(katottg.foreignKeys.filter(fk => fk.referencedTable === "IKIS_NDI.NDI_KATOTTG").length, 5);
+    equal(zo.primaryKey.columns.join(","), "ZO_ID");
   });
   test("salary denominator cannot divide by zero", () => {
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"] }));
