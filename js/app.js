@@ -6,18 +6,145 @@
     fields: [],
     filters: [],
     orderBy: [],
+    metrics: [],
+    presets: [],
+    latestPersonOnly: false,
+    parallel8: false,
     mode: "select",
     targetTable: "work_result",
   };
-  const MAX_STEP = 5;
+  const MAX_STEP = 6;
+  const TEMPLATE_SCRIPTS = [
+    {
+      id: "t6_2026_edrpou",
+      title: "t6_edrpou",
+      description:
+        "Скрипт для створення зведення з пакетів T6 за вибраний період.",
+      sql: `drop table t6_2026_edrpou purge;
+create table t6_2026_edrpou as
+select /*+parallel(pd,8)*/
+       lpad(mrd.mrd_reg_code, 2,0) reg,
+       slb_im,
+       ian_numident edrpou,
+       ian_name1,
+       pd.aped46_numident kod_zo,
+       cs_pfu.dwh_common.getdatefromnumident(aped46_numident) as birth_dt,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum) * -1 else pd.aped46_sum end) sum_narah,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum_pv) * -1 else pd.aped46_sum_pv end) sum_vrah,
+       sum(case when pd.aped46_pay_tp in (3,5,7,9,12) then abs(pd.aped46_sum_narah) * -1 else pd.aped46_sum_narah end) sum_narah_vnes,
+       nvl(pd.aped46_mnth, plb.slb_charg_mnth) aped46_mnth,
+       nvl(pd.aped46_year, plb.slb_charg_year) year,
+       aped46_zo kat_zo,
+       case
+         when aped46_numident is not null
+           and aped46_numident not like '00000%'
+           and regexp_instr(aped46_numident, '\\D') = 0
+         then mod(substr(aped46_numident, length(aped46_numident) - 1, 1), 2)
+         else aped46_sex
+       end sex
+from ikis_websm.sm_packlabel plb
+join ikis_websm.sm_ape4_6data pd on plb.slb_id = pd.aped46_slb
+join ikis_sys.mrdorg mrd on plb.slb_org_mdzu = mrd.mrd_code
+join ikis_ersp.pinsur_main im on plb.slb_im = im.im_id
+join ikis_ersp.pinsur_chng_doc chd on im.im_ih = chd.ih_id
+join ikis_ersp.pinsur_ankt_a ankt on chd.ih_ian = ankt.ian_id
+where plb.slb_fixed = 'Y'
+  and plb.slb_actuality = 'Y'
+  and plb.slb_st = 'O'
+  and pd.aped46_st = 'O'
+  and nvl(pd.aped46_year, plb.slb_charg_year) between {{YEAR_START}} and {{YEAR_END}}
+  and nvl(aped46_mnth, slb_charg_mnth) between {{MONTH_START}} and {{MONTH_END}}
+  {{APED46_OTK_CONDITION}}
+group by lpad(mrd.mrd_reg_code, 2,0),
+         slb_im,
+         ian_numident,
+         pd.aped46_numident,
+         aped46_zo,
+         nvl(pd.aped46_year, plb.slb_charg_year),
+         nvl(pd.aped46_mnth, plb.slb_charg_mnth),
+         aped46_sex,
+         ian_name1;
+
+
+
+
+
+`,
+      },
+    {
+      id: "t1_2024",
+      title: "t1",
+      description:
+        "КВЕД і ознака бюджетної організації зі звітності APE 4-1 за вибраний період.",
+      sql: `DROP TABLE t1_2024;
+
+CREATE TABLE t1_2024 AS
+SELECT /*+ PARALLEL(plb, 8) */
+       plb.slb_im,
+       plb.slb_charg_mnth,
+       plb.slb_charg_year,
+       SUBSTR(app4.ape1_eco_act, 1, 5) AS kved,
+       MAX(app4.ape1_budg_org) AS ape1_budg_org
+FROM ikis_websm.sm_packlabel plb
+JOIN ikis_websm.sm_ape4_1 app4
+  ON app4.ape1_slb = plb.slb_id
+WHERE plb.slb_charg_year BETWEEN {{YEAR_START}} AND {{YEAR_END}}
+  AND plb.slb_charg_mnth BETWEEN {{MONTH_START}} AND {{MONTH_END}}
+  AND plb.slb_system = 1
+  AND plb.slb_actuality = 'Y'
+  AND plb.slb_fixed = 'Y'
+  AND plb.slb_st = 'O'
+  AND app4.ape1_st = 'O'
+GROUP BY plb.slb_im,
+         plb.slb_charg_mnth,
+         plb.slb_charg_year,
+         SUBSTR(app4.ape1_eco_act, 1, 5);
+
+SELECT *
+FROM t1_2024;
+`,
+    },
+    {
+      id: "t2_2022",
+      title: "t2",
+      description:
+        "Зведення категорій ЗО, утримань і внесків із SK_APEQ_DODATOK2_DATA за вибраний період.",
+      sql: `CREATE TABLE t2_2022 AS
+SELECT /*+ PARALLEL(t, 8) */
+       TO_CHAR(LPAD(spl.spl_ru, 2, 0)) AS reg,
+       t.apqd2_zo AS cat_zo,
+       t.apqd2_numident AS numid,
+       t.apqd2_mnth AS mnth,
+       SUM(t.apqd2_sum_pv) AS sum_vrah,
+       SUM(t.apqd2_sum_v) AS sum_vnes,
+       spl.spl_im
+FROM ikis_websm.sk_apeq_dodatok2_data t
+JOIN ikis_websm.sk_packlabel spl
+  ON spl.spl_id = t.apqd2_spl
+JOIN ikis_websm.sk_packlabel_extended sple
+  ON sple.sple_id = spl.spl_id
+WHERE t.apqd2_year BETWEEN {{YEAR_START}} AND {{YEAR_END}}
+  AND t.apqd2_mnth BETWEEN {{MONTH_START}} AND {{MONTH_END}}
+  AND t.apqd2_st = 'O'
+  AND spl.spl_actuality = 'Y'
+GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
+         t.apqd2_zo,
+         t.apqd2_numident,
+         t.apqd2_mnth,
+         spl.spl_im;
+`,
+    },
+  ];
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   function tLabel(id) {
-    return SQL_SCHEMA.getTable(id)?.label || id;
+    const item = SQL_SCHEMA.getTable(id);
+    return (item && item.label) || id;
   }
   function cLabel(tableId, col) {
     const t = SQL_SCHEMA.getTable(tableId);
-    return t?.columns.find((x) => x.name === col)?.label || col;
+    const item = t && t.columns.find((x) => x.name === col);
+    return (item && item.label) || col;
   }
   function notify(msg, ok = true) {
     const el = $("#toast");
@@ -45,7 +172,8 @@
     root.innerHTML = "";
     const byGroup = {};
     SQL_SCHEMA.tables.forEach((t) => {
-      (byGroup[t.group] ||= []).push(t);
+      if (!byGroup[t.group]) byGroup[t.group] = [];
+      byGroup[t.group].push(t);
     });
     Object.keys(byGroup).forEach((g) => {
       const sec = document.createElement("section");
@@ -75,8 +203,11 @@
     const i = state.tables.indexOf(id);
     if (i >= 0) state.tables.splice(i, 1);
     else state.tables.push(id);
-    state.joins = SqlBuilder.suggestJoinsForTables(state.tables);
     state.fields = state.fields.filter((f) => state.tables.includes(f.table));
+    state.metrics = state.metrics.filter((id) => {
+      const metric = SQL_SCHEMA.metrics.find((m) => m.id === id);
+      return metric && metric.tables.every((tableId) => state.tables.includes(tableId));
+    });
     state.filters = state.filters.filter((f) => state.tables.includes(f.table));
     state.orderBy = state.orderBy.filter((o) => {
       if (o.fieldIndex != null) return o.fieldIndex < state.fields.length;
@@ -119,88 +250,53 @@
         "Одне джерело — з’єднувати нічого. Переходьте до «Результат».";
       return;
     }
-    hint.textContent =
-      "Оберіть поля, за якими рядки вважаються «одними й тими самими» між джерелами. Якщо зв’язок відомий системі — він уже підставлений.";
-    state.joins.forEach((j, idx) => root.appendChild(joinRow(j, idx)));
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "btn ghost";
-    add.textContent = "+ Ще одне з’єднання";
-    add.addEventListener("click", () => {
-      const a = state.tables[0];
-      const b = state.tables[1] || a;
-      state.joins.push({
-        leftTable: a,
-        rightTable: b,
-        leftCol: SQL_SCHEMA.getTable(a)?.columns[0]?.name || "",
-        rightCol: SQL_SCHEMA.getTable(b)?.columns[0]?.name || "",
-        type: "INNER",
-      });
-      renderJoins();
-      updateSql();
-    });
-    root.appendChild(add);
+    hint.textContent = "Зв’язки будуються автоматично як граф. Порядок вибору джерел не впливає на SQL.";
+    const result = SqlBuilder.build(state);
+    const graph = result.graph;
+    const bridges = (graph && graph.bridgeTables) || [];
+    $("#bridge-info").textContent = bridges.length
+      ? `Автоматично додані проміжні таблиці: ${bridges.map(tLabel).join(", ")}`
+      : "";
+    ((graph && graph.edges) || []).forEach((edge, idx) => root.appendChild(joinRow({
+      ...edge,
+      leftTable: edge.left,
+      rightTable: edge.right,
+    }, idx)));
   }
   function joinRow(j, idx) {
     const row = document.createElement("div");
     row.className = "join-row";
-    const typeOpts = SQL_SCHEMA.joinTypes
-      .map(
-        (t) =>
-          `<option value="${t.id}" ${t.id === j.type ? "selected" : ""}>${t.label}</option>`
-      )
-      .join("");
-    const leftTables = state.tables
-      .map(
-        (id) =>
-          `<option value="${id}" ${id === j.leftTable ? "selected" : ""}>${tLabel(id)}</option>`
-      )
-      .join("");
-    const rightTables = state.tables
-      .map(
-        (id) =>
-          `<option value="${id}" ${id === j.rightTable ? "selected" : ""}>${tLabel(id)}</option>`
-      )
-      .join("");
+    const conditions = (j.conditions || []).map((condition) =>
+      `<div class="join-line"><code>${cLabel(j.leftTable, condition.leftCol)}</code><span class="join-word">=</span><code>${cLabel(j.rightTable, condition.rightCol)}</code></div>`
+    ).join("");
+    const variants = (j.variants || []).map((variant) =>
+      `<option value="${variant.id}" ${variant.id === j.selectedVariant ? "selected" : ""}>${variant.label}</option>`
+    ).join("");
     row.innerHTML = `
       <div class="join-plain">
         <div class="join-line">
-          <span class="join-word">Тип:</span>
-          <select data-k="type" class="join-type">${typeOpts}</select>
+          <strong>${tLabel(j.leftTable)}</strong><span class="join-word">→</span><strong>${tLabel(j.rightTable)}</strong>
+          <span class="badge">${j.type} · ${j.cardinality || "невідомо"}</span>
         </div>
-        <div class="join-line">
-          <select data-k="leftTable">${leftTables}</select>
-          <select data-k="leftCol">${colOptions(j.leftTable, j.leftCol)}</select>
-          <span class="join-word">=</span>
-          <select data-k="rightTable">${rightTables}</select>
-          <select data-k="rightCol">${colOptions(j.rightTable, j.rightCol)}</select>
-          <button type="button" class="btn danger icon" data-del>×</button>
-        </div>
+        ${variants ? `<label class="join-line"><span class="join-word">Спосіб зіставлення:</span><select data-join-variant>${variants}</select></label>` : ""}
+        ${conditions}
         ${j.note ? `<div class="join-note">${j.note}</div>` : ""}
       </div>
     `;
-    $$("select", row).forEach((sel) => {
-      sel.addEventListener("change", () => {
-        j[sel.dataset.k] = sel.value;
-        if (sel.dataset.k === "leftTable") {
-          j.leftCol = SQL_SCHEMA.getTable(j.leftTable)?.columns[0]?.name || "";
-        }
-        if (sel.dataset.k === "rightTable") {
-          j.rightCol = SQL_SCHEMA.getTable(j.rightTable)?.columns[0]?.name || "";
-        }
-        renderJoins();
-        updateSql();
-      });
-    });
-    $("[data-del]", row).addEventListener("click", () => {
-      state.joins.splice(idx, 1);
+    const variantSelect = $("[data-join-variant]", row);
+    if (variantSelect) variantSelect.addEventListener("change", (event) => {
+      const selectedVariant = event.target.value;
+      const existing = state.joins.find((item) => item.id === j.id);
+      if (existing) existing.selectedVariant = selectedVariant;
+      else state.joins.push({ id: j.id, selectedVariant });
       renderJoins();
       updateSql();
     });
     return row;
   }
   function colOptions(tableId, selected) {
-    return (SQL_SCHEMA.getTable(tableId)?.columns || [])
+    const item = SQL_SCHEMA.getTable(tableId);
+    return ((item && item.columns) || [])
       .map(
         (c) =>
           `<option value="${c.name}" ${c.name === selected ? "selected" : ""}>${c.label}</option>`
@@ -218,6 +314,7 @@
     const emptyHint = $("#fields-empty-hint");
     const countEl = $("#chosen-count");
     if (!avail || !chosen) return;
+    renderMetrics();
     avail.innerHTML = "";
     chosen.innerHTML = "";
     if (!state.tables.length) {
@@ -320,7 +417,8 @@
         renderOrder();
         updateSql();
       });
-      $("[data-up]", card)?.addEventListener("click", () => {
+      const upButton = $("[data-up]", card);
+      if (upButton) upButton.addEventListener("click", () => {
         if (idx <= 0) return;
         [state.fields[idx - 1], state.fields[idx]] = [
           state.fields[idx],
@@ -331,7 +429,8 @@
         renderOrder();
         updateSql();
       });
-      $("[data-down]", card)?.addEventListener("click", () => {
+      const downButton = $("[data-down]", card);
+      if (downButton) downButton.addEventListener("click", () => {
         if (idx >= state.fields.length - 1) return;
         [state.fields[idx], state.fields[idx + 1]] = [
           state.fields[idx + 1],
@@ -345,10 +444,30 @@
       chosen.appendChild(card);
     });
   }
+  function renderMetrics() {
+    const root = $("#metrics-list");
+    if (!root) return;
+    root.innerHTML = "";
+    SQL_SCHEMA.metrics
+      .filter((metric) => metric.tables.every((tableId) => state.tables.includes(tableId)))
+      .forEach((metric) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "col-chip" + (state.metrics.includes(metric.id) ? " selected" : "");
+        button.textContent = metric.label;
+        button.addEventListener("click", () => {
+          const index = state.metrics.indexOf(metric.id);
+          if (index >= 0) state.metrics.splice(index, 1); else state.metrics.push(metric.id);
+          renderMetrics();
+          updateSql();
+        });
+        root.appendChild(button);
+      });
+  }
   function isNumericColumn(tableId, colName) {
     const t = SQL_SCHEMA.getTable(tableId);
-    const c = t?.columns.find((x) => x.name === colName);
-    const ty = (c?.type || "").toUpperCase();
+    const c = t && t.columns.find((x) => x.name === colName);
+    const ty = ((c && c.type) || "").toUpperCase();
     return /NUMBER|INT|FLOAT|DECIMAL/.test(ty);
   }
   function swapOrderIndexes(a, b) {
@@ -374,7 +493,7 @@
       fieldOpts = state.fields
         .map((f, i) => {
           const op = f.agg
-            ? SQL_SCHEMA.aggregates.find((a) => a.id === f.agg)?.label + " · "
+            ? ((SQL_SCHEMA.aggregates.find((a) => a.id === f.agg) || {}).label || "") + " · "
             : "";
           return `<option value="f:${i}" ${
             o.fieldIndex === i ? "selected" : ""
@@ -383,7 +502,8 @@
         .join("");
     } else {
       state.tables.forEach((tid) => {
-        SQL_SCHEMA.getTable(tid)?.columns.forEach((c) => {
+        const selectedTable = SQL_SCHEMA.getTable(tid);
+        if (selectedTable) selectedTable.columns.forEach((c) => {
           const val = `c:${tid}.${c.name}`;
           const selected =
             o.fieldIndex == null && o.table === tid && o.column === c.name;
@@ -432,7 +552,7 @@
         const match = state.fields.find(
           (f) => f.table === o.table && f.column === o.column && f.agg
         );
-        o.agg = match?.agg || "";
+        o.agg = (match && match.agg) || "";
       }
       updateSql();
     });
@@ -463,7 +583,7 @@
       const tid = state.tables[0];
       state.filters.push({
         table: tid,
-        column: SQL_SCHEMA.getTable(tid)?.columns[0]?.name || "",
+        column: SQL_SCHEMA.getTable(tid).columns[0] ? SQL_SCHEMA.getTable(tid).columns[0].name : "",
         op: "=",
         value: "",
       });
@@ -476,10 +596,33 @@
   function renderQuickFilters() {
     const root = $("#quick-filters");
     root.innerHTML = `<span class="muted">Швидко (з обраних полів):</span>`;
+    const helpBtn = document.createElement("button");
+    helpBtn.type = "button";
+    helpBtn.className = "help-btn";
+    helpBtn.title = "Довідник категорій ЗО";
+    helpBtn.setAttribute("aria-label", "Довідник категорій ЗО");
+    helpBtn.textContent = "?";
+    helpBtn.addEventListener("click", openZoCategoryHelp);
+    root.appendChild(helpBtn);
     const chips = [];
+    const categorySource = state.tables.includes("t6_2026_edrpou")
+      ? { table: "t6_2026_edrpou", column: "kat_zo" }
+      : state.tables.includes("sm_ape4_6data")
+        ? { table: "sm_ape4_6data", column: "aped46_zo" }
+        : null;
+    if (categorySource) {
+      const groups = SQL_SCHEMA.zoFilterGroups || {};
+      const military = (groups.military || []).join(", ");
+      const disability = (groups.disability || []).join(", ");
+      chips.push(
+        { id: "military", label: "Військові", ...categorySource, op: "IN", value: military },
+        { id: "civilian", label: "Цивільні", ...categorySource, op: "NOT IN", value: military },
+        { id: "disability", label: "Особи з інвалідністю", ...categorySource, op: "IN", value: disability }
+      );
+    }
     state.tables.forEach((tid) => {
       const t = SQL_SCHEMA.getTable(tid);
-      (t?.columns || []).forEach((c) => {
+      ((t && t.columns) || []).forEach((c) => {
         const name = c.label.toLowerCase();
         if (/\b(іпн|рнокпп|єдрпоу|код|номер)\b/i.test(c.label) || /ident|edrpou|kod|code|numident/i.test(c.name)) {
           chips.push({
@@ -512,7 +655,7 @@
     });
     const seen = new Set();
     chips.slice(0, 24).forEach((ch) => {
-      const key = `${ch.table}.${ch.column}.${ch.op}`;
+      const key = ch.id || `${ch.table}.${ch.column}.${ch.op}`;
       if (seen.has(key)) return;
       seen.add(key);
       if (seen.size > 8) return;
@@ -573,7 +716,8 @@
       const go = () => {
         f[el.dataset.k] = el.value;
         if (el.dataset.k === "table") {
-          f.column = SQL_SCHEMA.getTable(f.table)?.columns[0]?.name || "";
+          const selectedTable = SQL_SCHEMA.getTable(f.table);
+          f.column = selectedTable && selectedTable.columns[0] ? selectedTable.columns[0].name : "";
         }
         if (el.dataset.k === "table" || el.dataset.k === "op") renderFilters();
         updateSql();
@@ -589,23 +733,29 @@
     return row;
   }
   function updateSql() {
-    $("#sql-out").value = SqlBuilder.buildSelect(state);
-    $("#sql-explain").innerHTML = buildExplain();
+    const result = SqlBuilder.build(state);
+    $("#sql-out").value = result.sql || result.errors.map((error) => `-- ПОМИЛКА: ${error}`).join("\n");
+    const status = $("#sql-status");
+    status.className = "sql-status" + (result.errors.length ? " error" : result.warnings.length ? " warning" : "");
+    status.innerHTML = result.errors.length
+      ? result.errors.map((error) => `<p><strong>Помилка:</strong> ${error}</p>`).join("")
+      : result.warnings.map((warning) => `<p><strong>Увага:</strong> ${warning}</p>`).join("");
+    $("#sql-explain").innerHTML = buildExplain(result);
   }
-  function buildExplain() {
+  function buildExplain(result) {
     if (!state.tables.length) return "<p>Поки нічого не зібрано.</p>";
     const lines = [];
     lines.push(
       `<li><b>Джерела:</b> ${state.tables.map(tLabel).join("; ")}</li>`
     );
-    if (state.joins.length) {
+    const resolvedEdges = (result && result.graph && result.graph.edges) || [];
+    if (resolvedEdges.length) {
       lines.push(
-        `<li><b>З’єднання:</b> ${state.joins
+        `<li><b>З’єднання:</b> ${resolvedEdges
           .map(
-            (j) =>
-              `${tLabel(j.leftTable)} [${cLabel(j.leftTable, j.leftCol)}] = ${tLabel(
-                j.rightTable
-              )} [${cLabel(j.rightTable, j.rightCol)}]`
+            (j) => `${tLabel(j.left)} ↔ ${tLabel(j.right)}: ${(j.conditions || []).map((condition) =>
+              `[${cLabel(j.left, condition.leftCol)}] = [${cLabel(j.right, condition.rightCol)}]`
+            ).join(" AND ")}`
           )
           .join("; ")}</li>`
       );
@@ -615,7 +765,7 @@
         `<li><b>У результаті:</b> ${state.fields
           .map((f) => {
             const a = f.agg
-              ? SQL_SCHEMA.aggregates.find((x) => x.id === f.agg)?.label + " — "
+              ? ((SQL_SCHEMA.aggregates.find((x) => x.id === f.agg) || {}).label || "") + " — "
               : "";
             return a + cLabel(f.table, f.column);
           })
@@ -623,6 +773,12 @@
       );
     } else {
       lines.push(`<li><b>У результаті:</b> усі поля</li>`);
+    }
+    if (state.metrics.length) {
+      lines.push(`<li><b>Показники:</b> ${state.metrics.map((id) => {
+        const metric = SQL_SCHEMA.metrics.find((item) => item.id === id);
+        return (metric && metric.label) || id;
+      }).join("; ")}</li>`);
     }
     if (state.orderBy.length) {
       lines.push(`<li><b>Сортування:</b> ${state.orderBy.length} правил(а)</li>`);
@@ -632,14 +788,14 @@
         `<li><b>Фільтри:</b> ${state.filters
           .map((f) => {
             const op =
-              SQL_SCHEMA.operators.find((o) => o.id === f.op)?.label || f.op;
+              (SQL_SCHEMA.operators.find((o) => o.id === f.op) || {}).label || f.op;
             return `${cLabel(f.table, f.column)} ${op} ${f.value || "…"}`;
           })
           .join("; ")}</li>`
       );
     }
     const modeLabel =
-      SQL_SCHEMA.outputModes.find((m) => m.id === state.mode)?.label ||
+      (SQL_SCHEMA.outputModes.find((m) => m.id === state.mode) || {}).label ||
       state.mode;
     lines.push(`<li><b>Дія:</b> ${modeLabel}</li>`);
     return `<ul>${lines.join("")}</ul>`;
@@ -673,9 +829,10 @@
     }
     if (state.step === 4) renderFilters();
     if (state.step === 5) updateSql();
+    if (state.step === 6) renderTemplates();
   }
   function goToStep(n) {
-    if (n > 1 && !state.tables.length) {
+    if (n > 1 && n < MAX_STEP && !state.tables.length) {
       notify("Спочатку оберіть джерела", false);
       return;
     }
@@ -691,15 +848,138 @@
       fields: [],
       filters: [],
       orderBy: [],
+      metrics: [],
+      presets: [],
+      latestPersonOnly: false,
+      parallel8: false,
       mode: "select",
       targetTable: "work_result",
     });
     renderCatalog();
     renderSelectedStrip();
     renderModeUi();
+    $("#preset-current-insurer").checked = false;
+    $("#filter-latest-person").checked = false;
+    $("#use-parallel-8").checked = false;
     syncSteps();
     updateSql();
     notify("Очищено");
+  }
+  function renderTemplates() {
+    const root = $("#templates-list");
+    root.innerHTML = TEMPLATE_SCRIPTS.map(
+      (tpl, idx) => `
+        <article class="preset-card">
+          <strong>${tpl.title}</strong>
+          <span>${tpl.description}</span>
+          <div class="preset-actions">
+            <button type="button" class="btn" data-load="${idx}">Вставити</button>
+            <button type="button" class="btn ghost" data-copy="${idx}">Копіювати</button>
+          </div>
+        </article>`
+    ).join("");
+    root.querySelectorAll("[data-load]").forEach((btn) => {
+      btn.addEventListener("click", () => loadTemplate(Number(btn.dataset.load)));
+    });
+    root.querySelectorAll("[data-copy]").forEach((btn) => {
+      btn.addEventListener("click", () => copyTemplate(Number(btn.dataset.copy)));
+    });
+  }
+  function loadTemplate(index) {
+    const tpl = TEMPLATE_SCRIPTS[index];
+    if (!tpl) return;
+    const sql = applyTemplateSettings(tpl.sql);
+    $("#sql-out").value = sql;
+    $("#sql-explain").innerHTML = `<p>Завантажено шаблон: <strong>${tpl.title}</strong>.</p>`;
+    notify("Шаблон завантажено");
+  }
+  async function copyTemplate(index) {
+    const tpl = TEMPLATE_SCRIPTS[index];
+    if (!tpl) return;
+    const sql = applyTemplateSettings(tpl.sql);
+    try {
+      await navigator.clipboard.writeText(sql);
+      notify("Шаблон скопійовано");
+    } catch (error) {
+      const area = document.createElement("textarea");
+      area.value = sql;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      document.body.removeChild(area);
+      notify("Шаблон скопійовано");
+    }
+  }
+
+  function getTemplateSettings() {
+    return {
+      yearStart: Number($("#tpl-year-start").value) || 2022,
+      yearEnd: Number($("#tpl-year-end").value) || 2026,
+      monthStart: Number($("#tpl-month-start").value) || 1,
+      monthEnd: Number($("#tpl-month-end").value) || 6,
+      otk: $("#tpl-otk").value,
+    };
+  }
+
+  function applyTemplateSettings(sql) {
+    return TemplateUtils.apply(sql, getTemplateSettings());
+  }
+
+  function zoCategoryTag(code) {
+    const groups = SQL_SCHEMA.zoFilterGroups || {};
+    if ((groups.military || []).indexOf(code) >= 0) return `<span class="zo-cat-tag military">військові</span>`;
+    if ((groups.disability || []).indexOf(code) >= 0) return `<span class="zo-cat-tag disability">інвалідність</span>`;
+    return "";
+  }
+  function renderZoCategoryList(query) {
+    const root = $("#zo-category-list");
+    if (!root) return;
+    const q = String(query || "").trim().toLowerCase();
+    const items = (SQL_SCHEMA.zoCategories || []).filter((item) => {
+      if (!q) return true;
+      return String(item.code).includes(q) || String(item.label || "").toLowerCase().includes(q);
+    });
+    root.innerHTML = items.length
+      ? items.map((item) =>
+          `<div class="zo-cat-row">
+            <span class="zo-cat-code">${item.code}</span>
+            <span class="zo-cat-label">${item.label}</span>
+            ${zoCategoryTag(item.code)}
+          </div>`
+        ).join("")
+      : `<p class="muted">Нічого не знайдено.</p>`;
+  }
+  function openZoCategoryHelp() {
+    const overlay = $("#zo-category-dialog");
+    if (!overlay) return;
+    overlay.hidden = false;
+    renderZoCategoryList($("#zo-category-search") && $("#zo-category-search").value);
+    const search = $("#zo-category-search");
+    if (search) search.focus();
+  }
+  function closeZoCategoryHelp() {
+    const overlay = $("#zo-category-dialog");
+    if (overlay) overlay.hidden = true;
+  }
+  function bindZoCategoryHelp() {
+    const openBtn = $("#zo-category-help");
+    const closeBtn = $("#zo-category-close");
+    const overlay = $("#zo-category-dialog");
+    const search = $("#zo-category-search");
+    if (openBtn) openBtn.addEventListener("click", openZoCategoryHelp);
+    if (closeBtn) closeBtn.addEventListener("click", closeZoCategoryHelp);
+    if (overlay) {
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) closeZoCategoryHelp();
+      });
+    }
+    if (search) {
+      search.addEventListener("input", () => renderZoCategoryList(search.value));
+    }
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && overlay && !overlay.hidden) closeZoCategoryHelp();
+    });
+    renderZoCategoryList("");
   }
   function bind() {
     $("#btn-next").addEventListener("click", () => go(1));
@@ -719,6 +999,18 @@
       state.targetTable = e.target.value.trim() || "work_result";
       updateSql();
     });
+    $("#preset-current-insurer").addEventListener("change", (event) => {
+      state.presets = event.target.checked ? ["current_insurer_profile"] : [];
+      updateSql();
+    });
+    $("#filter-latest-person").addEventListener("change", (event) => {
+      state.latestPersonOnly = event.target.checked;
+      updateSql();
+    });
+    $("#use-parallel-8").addEventListener("change", (event) => {
+      state.parallel8 = event.target.checked;
+      updateSql();
+    });
     $("#btn-add-order").addEventListener("click", () => {
       if (state.fields.length) {
         state.orderBy.push({ fieldIndex: 0, dir: "DESC" });
@@ -736,7 +1028,7 @@
       try {
         await navigator.clipboard.writeText($("#sql-out").value);
         notify("Скопійовано");
-      } catch {
+      } catch (error) {
         $("#sql-out").select();
         document.execCommand("copy");
         notify("Скопійовано");
@@ -754,6 +1046,7 @@
       notify("Збережено");
     });
     $("#btn-reset").addEventListener("click", resetAll);
+    bindZoCategoryHelp();
     $("#search-tables").addEventListener("input", (e) => {
       const q = e.target.value.trim().toLowerCase();
       $$(".table-card").forEach((card) => {
@@ -769,12 +1062,20 @@
     });
   }
   function init() {
-    bind();
-    renderCatalog();
-    renderSelectedStrip();
-    renderModeUi();
-    syncSteps();
-    updateSql();
+    try {
+      bind();
+      renderCatalog();
+      renderSelectedStrip();
+      renderModeUi();
+      syncSteps();
+      updateSql();
+    } catch (error) {
+      const catalog = document.querySelector("#table-catalog");
+      if (catalog) {
+        catalog.innerHTML = `<p class="error-message"><strong>Помилка запуску конструктора:</strong> ${String(error && error.message ? error.message : error)}</p>`;
+      }
+      throw error;
+    }
   }
   document.addEventListener("DOMContentLoaded", init);
 })();

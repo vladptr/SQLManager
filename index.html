@@ -22,6 +22,7 @@
           <button type="button" class="step-pill" data-step="3">3. Результат</button>
           <button type="button" class="step-pill" data-step="4">4. Фільтри</button>
           <button type="button" class="step-pill" data-step="5">5. SQL</button>
+          <button type="button" class="step-pill" data-step="6">6. Шаблони</button>
         </nav>
       </header>
 
@@ -78,7 +79,13 @@
             <div class="block" id="joins-block">
               <h3 class="block-title">З’єднання джерел</h3>
               <p class="hint" id="joins-hint"></p>
+              <div id="bridge-info" class="hint"></div>
               <div id="joins-list"></div>
+            </div>
+            <div class="block">
+              <h3 class="block-title">Семантичні правила</h3>
+              <label><input id="preset-current-insurer" type="checkbox" /> Актуальні реквізити та КВЕД страхувальника</label>
+              <p class="hint">Додає статуси актуальності лише за вашим вибором; історичні записи не фільтруються автоматично.</p>
             </div>
           </section>
 
@@ -92,6 +99,12 @@
               <b>3.</b> За потреби знизу вкажіть, <em>в якому порядку</em> показувати
               рядки.
             </p>
+
+            <div class="block">
+              <h3 class="block-title">Готові показники</h3>
+              <p class="hint">Показники враховують зернистість і не підміняють кількість осіб кількістю рядків.</p>
+              <div id="metrics-list" class="quick-filters"></div>
+            </div>
 
             <div class="result-builder" id="result-builder">
               <div class="result-col result-available">
@@ -130,12 +143,23 @@
 
           
           <section class="panel" data-step="4">
-            <h2>Які рядки залишити?</h2>
+            <h2>
+              Які рядки залишити?
+              <button type="button" class="help-btn" id="zo-category-help" title="Довідник категорій ЗО" aria-haspopup="dialog" aria-controls="zo-category-dialog">?</button>
+            </h2>
             <p class="sub">
               Обмеження вибірки: конкретний код, період, «поле містить…», «не
               порожнє» тощо. Без умов — потраплять усі рядки, що підходять за
-              з’єднаннями.
+              з’єднаннями. Знак питання відкриває коди категорій ЗО.
             </p>
+            <label class="check-line">
+              <input id="filter-latest-person" type="checkbox" />
+              Лише остання картка особи за датою зміни
+            </label>
+            <label class="check-line">
+              <input id="use-parallel-8" type="checkbox" />
+              Використовувати Oracle hint PARALLEL(8)
+            </label>
             <div id="filters-list"></div>
             <div class="quick-filters" id="quick-filters"></div>
           </section>
@@ -151,6 +175,43 @@
             </p>
           </section>
 
+          <section class="panel" data-step="6">
+            <h2>Шаблони SQL</h2>
+            <p class="sub">
+              Тут зберігаються стандартизовані скрипти для створення таблиць,
+              вибірки даних та інших повторюваних задач.
+            </p>
+            <div class="template-settings" id="template-settings">
+              <div class="template-settings-row">
+                <label>
+                  Рік від
+                  <input id="tpl-year-start" type="number" min="2000" max="2100" value="2022" />
+                </label>
+                <label>
+                  Рік до
+                  <input id="tpl-year-end" type="number" min="2000" max="2100" value="2026" />
+                </label>
+                <label>
+                  Місяць від
+                  <input id="tpl-month-start" type="number" min="1" max="12" value="1" />
+                </label>
+                <label>
+                  Місяць до
+                  <input id="tpl-month-end" type="number" min="1" max="12" value="6" />
+                </label>
+                <label>
+                  OTK (1/0, лише T6)
+                  <select id="tpl-otk">
+                    <option value="any">Будь-яке</option>
+                    <option value="1">Так (1)</option>
+                    <option value="0">Ні (0)</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div id="templates-list" class="presets"></div>
+          </section>
+
           <div class="nav">
             <button type="button" class="btn secondary" id="btn-back" disabled>
               Назад
@@ -164,6 +225,7 @@
           <p class="muted" style="margin: 0; font-size: 0.9rem">
             Оновлюється під час вибору на будь-якому кроці.
           </p>
+          <div id="sql-status" class="sql-status" role="alert" aria-live="polite"></div>
           <div class="sql-actions">
             <button type="button" class="btn" id="btn-copy">Копіювати</button>
             <button type="button" class="btn ghost" id="btn-download">
@@ -180,8 +242,31 @@
 
     <div class="toast" id="toast" role="status"></div>
 
+    <div class="help-overlay" id="zo-category-dialog" hidden>
+      <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="zo-category-title">
+        <div class="help-dialog-head">
+          <h3 id="zo-category-title">Категорії застрахованих осіб (ЗО)</h3>
+          <button type="button" class="help-close" id="zo-category-close" aria-label="Закрити">×</button>
+        </div>
+        <p class="help-dialog-note">Код категорії (<code>kat_zo</code> / <code>aped46_zo</code>) і хто це. Швидкі фільтри «Військові» та «Особи з інвалідністю» використовують позначені коди.</p>
+        <input id="zo-category-search" type="search" placeholder="Пошук за номером або назвою…" />
+        <div class="help-dialog-list" id="zo-category-list"></div>
+      </div>
+    </div>
+
+    <script>
+      window.addEventListener("error", function (event) {
+        var catalog = document.getElementById("table-catalog");
+        if (!catalog) return;
+        catalog.innerHTML =
+          '<p class="error-message"><strong>Помилка запуску конструктора:</strong> ' +
+          String(event.message || "невідома помилка JavaScript") +
+          " (рядок " + String(event.lineno || "?") + ")</p>";
+      });
+    </script>
     <script src="data/schema.js"></script>
     <script src="js/sql-builder.js"></script>
+    <script src="js/template-utils.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>
