@@ -484,6 +484,7 @@
   test("annual income uses person-year", () => {
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"] }));
     includes(r.sql, "person_year AS");
+    includes(r.sql, 't6.year AS "year"');
     includes(r.sql, "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)");
   });
   test("annual income rejects payroll companion", () => {
@@ -537,6 +538,13 @@
     includes(r.sql, "GROUP BY year, kod_zo, sex");
     includes(r.sql, "t6.sex AS");
   });
+  test("annual income allows age calculated at year end", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "age", agg: "" }] }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_year_age AS");
+    includes(r.sql, "TRUNC(MONTHS_BETWEEN(TO_DATE('31.12.' || year, 'DD.MM.YYYY'), birth_dt) / 12) AS age");
+    includes(r.sql, "t6.age AS");
+  });
   test("annual income allows age-group breakdown through birth date", () => {
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "age_group", agg: "" }] }));
     equal(r.errors.length, 0);
@@ -544,6 +552,7 @@
     includes(r.sql, "TO_DATE('31.12.' || year, 'DD.MM.YYYY')");
     includes(r.sql, "WHEN age BETWEEN 20 AND 24 THEN '20-24'");
     includes(r.sql, "WHEN age >= 65 THEN '65+'");
+    includes(r.sql, "WHEN age IS NULL THEN NULL");
     includes(r.sql, "t6.age_group AS");
   });
   test("annual income allows sex and age-group with person count", () => {
