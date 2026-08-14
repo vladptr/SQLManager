@@ -36,6 +36,21 @@
               (Технічні імена таблиць БД лише дрібним текстом — для вас вони не
               обов’язкові.)
             </p>
+            <div class="block ready-reports">
+              <h3 class="block-title">Готові звіти</h3>
+              <p class="hint">Оберіть задачу — вона заповнить той самий перевірений конструктор. Параметри можна змінити на наступних кроках.</p>
+              <div class="template-settings-row ready-report-params">
+                <label>Рік <input id="ready-year" type="number" min="2000" max="2100" value="2026" /></label>
+                <label>Місяць від <input id="ready-month-from" type="number" min="1" max="12" value="1" /></label>
+                <label>Місяць до <input id="ready-month-to" type="number" min="1" max="12" value="12" /></label>
+                <label>Регіон <input id="ready-region" type="text" placeholder="необов’язково" /></label>
+                <label>Зерно <select id="ready-grain"><option value="person_month">особа–місяць</option><option value="person_employer_month" selected>особа–роботодавець–місяць</option></select></label>
+                <label>Популяція <select id="ready-population"><option value="reported">є запис T6</option><option value="positive_salary">зарплата &gt; 0</option></select></label>
+                <label>Режим <select id="ready-semantic-mode"><option value="current">актуальний</option><option value="all_history">усі історичні версії</option></select></label>
+              </div>
+              <div id="ready-report-list" class="card-grid"></div>
+            </div>
+            <h3 class="block-title">Розширений конструктор</h3>
             <div class="toolbar">
               <input
                 id="search-tables"
@@ -89,8 +104,19 @@
             </div>
             <div class="block">
               <h3 class="block-title">Семантичні правила</h3>
-              <label><input id="preset-current-insurer" type="checkbox" /> Актуальні реквізити та КВЕД страхувальника</label>
-              <p class="hint">Додає статуси актуальності лише за вашим вибором; історичні записи не фільтруються автоматично.</p>
+              <label>Режим даних
+                <select id="semantic-mode">
+                  <option value="current">Актуальний профіль</option>
+                  <option value="all_history">Усі історичні версії</option>
+                </select>
+              </label>
+              <label class="check-line" id="all-history-confirm-wrap" hidden><input id="all-history-confirmed" type="checkbox" /> Я розумію, що історичні версії можуть розмножити рядки та суми</label>
+              <p class="hint">Для актуального режиму застосовуються підтверджені правила статусів. Якщо вони не гарантують єдиний головний КВЕД, SQL покаже діагностику.</p>
+            </div>
+            <div class="block">
+              <h3 class="block-title">Якість даних</h3>
+              <label><input id="quality-accepted-packages" type="checkbox" /> Лише прийняті й актуальні пакети</label>
+              <p class="hint">Профіль видимий і застосовується тільки після вашого вибору.</p>
             </div>
           </section>
 
@@ -228,6 +254,11 @@
             </div>
             <h3 class="block-title saved-presets-title">Мої пресети конструктора</h3>
             <p class="hint">Зберігаються лише у цьому браузері на цьому комп’ютері.</p>
+            <div class="preset-actions">
+              <button type="button" class="btn ghost" id="btn-export-presets">Експорт JSON</button>
+              <button type="button" class="btn ghost" id="btn-import-presets">Імпорт JSON</button>
+              <input type="file" id="preset-import-file" accept="application/json,.json" hidden />
+            </div>
             <div id="saved-presets-list" class="presets"></div>
             <div id="templates-list" class="presets"></div>
           </section>
@@ -281,10 +312,13 @@
       window.addEventListener("error", function (event) {
         var catalog = document.getElementById("table-catalog");
         if (!catalog) return;
-        catalog.innerHTML =
-          '<p class="error-message"><strong>Помилка запуску конструктора:</strong> ' +
+        catalog.replaceChildren();
+        var message = document.createElement("p");
+        message.className = "error-message";
+        message.textContent = "Помилка запуску конструктора: " +
           String(event.message || "невідома помилка JavaScript") +
-          " (рядок " + String(event.lineno || "?") + ")</p>";
+          " (рядок " + String(event.lineno || "?") + ")";
+        catalog.appendChild(message);
       });
     </script>
     <script src="data/physical-schema.generated.js"></script>

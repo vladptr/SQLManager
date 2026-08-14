@@ -4,6 +4,15 @@
     salary_esv: "Зарплата та ЄСВ",
     employment: "Трудові відносини та посади",
     report_packages: "Пакети звітності",
+    package_headers: "Заголовки пакетів",
+    appendix_4: "Додатки 4",
+    appendix_5: "Додатки 5",
+    appendix_6: "Додатки 6",
+    quarterly_apeq: "Квартальні APEQ",
+    payments: "Платежі",
+    statuses_control: "Статуси та контроль",
+    files_uploads: "Файли й завантаження",
+    report_archive: "Архів та історія звітності",
     insurers: "Страхувальники",
     insurer_kved: "КВЕД страхувальника",
     persons: "Особи та документи",
@@ -48,12 +57,23 @@
     if (/PERSON|INSURED/.test(name)) return "persons";
     if (/KVED/.test(name)) return "insurer_kved";
     if (/^PINSUR_/.test(name)) return "insurers";
-    if (/PACKLABEL|PACKAGE/.test(name)) return "report_packages";
+    if (/(_HST|_HIST|_ARCH|_OLD)$/.test(name) && schemaName(table) === "IKIS_WEBSM") return "report_archive";
+    if (/FILE|LOAD|UPLOAD|ATTACH|DOCUMENT/.test(name) && schemaName(table) === "IKIS_WEBSM") return "files_uploads";
+    if (/STATUS|STATE|CONTROL|CHECK|ERROR|REJECT/.test(name) && schemaName(table) === "IKIS_WEBSM") return "statuses_control";
+    if (/PAY|PAYMENT|PLAT|VNES/.test(name) && schemaName(table) === "IKIS_WEBSM") return "payments";
+    if (/APEQ|SK_APEQ/.test(name)) return "quarterly_apeq";
+    if (/APE4_|APP4_|APD4/.test(name)) return "appendix_4";
+    if (/APE5_|APP5_|APD5/.test(name)) return "appendix_5";
+    if (/APE6_|APP6_|APD6/.test(name)) return "appendix_6";
+    if (/PACKLABEL|PACKAGE/.test(name)) return "package_headers";
     if (/APE4_5/.test(name)) return "employment";
     if (/APE4_6|PAY|SALARY|ESV/.test(name)) return "salary_esv";
     if (schemaName(table) === "IKIS_NDI") return "directories";
     if (schemaName(table) === "IKIS_PERSON") return "persons";
-    return "report_packages";
+    if (schemaName(table) === "IKIS_ERSP") return "insurers";
+    if (schemaName(table) === "IKIS_SYS") return "directories";
+    if (schemaName(table) === "IKIS_WEBSM") return "statuses_control";
+    return "work";
   }
   function get(table) {
     var manual = coreByName[tableName(table)] || {};
@@ -71,8 +91,25 @@
       description: manual.description || table.description || "",
       routeBridge: !!manual.routeBridge,
       schema: schemaName(table),
-      grain: manual.grain || table.grain || ""
+      grain: manual.grain || table.grain || inferGrain(table),
+      role: manual.role || inferRole(table, category),
+      availability: table.unresolvedExternal ? "зовнішня" : "доступна"
     };
+  }
+  function inferGrain(table) {
+    var name = tableName(table);
+    if (/PACKLABEL|HEADER/.test(name)) return "один пакет";
+    if (/DATA|DETAIL|ROW/.test(name)) return "рядок звіту";
+    if (/NSI_|DIC_/.test(name)) return "запис довідника";
+    if (/_HST|HISTORY/.test(name)) return "історична версія";
+    return "запис таблиці";
+  }
+  function inferRole(table, category) {
+    if (category === "technical") return "технічна";
+    if (/history|archive/.test(category) || /_HST|HISTORY/.test(tableName(table))) return "історія";
+    if (category === "directories" || /^NSI_|^DIC_/.test(tableName(table))) return "довідник";
+    if (/2|BRIDGE|LINK/.test(tableName(table))) return "bridge";
+    return "факт";
   }
   function searchableText(table, config) {
     return [config.label, config.description, table.fullName, table.name, table.schema]

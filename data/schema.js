@@ -597,15 +597,16 @@ window.SQL_SCHEMA = {
     { id: "raw_payroll", label: "Фонд оплати (сира Т6 зі сторнуванням)", tables: ["sm_packlabel", "sm_ape4_6data"], expression: "SUM(CASE WHEN {sm_ape4_6data}.aped46_pay_tp IN (3, 5, 7, 9, 12) THEN -ABS({sm_ape4_6data}.aped46_sum) ELSE {sm_ape4_6data}.aped46_sum END)", alias: "payroll_sum" },
     { id: "avg_salary_month", salaryMetric: true, label: "Середня зарплата за місяць", tables: ["t6_2026_edrpou"], alias: "avg_salary_month", numerator: "сума місячної зарплати", denominator: "кількість активних одиниць за місяць", unit: "грн на місяць", period: "місяць" },
     { id: "avg_monthly_salary_period", salaryMetric: true, label: "Середньомісячна зарплата за період", tables: ["t6_2026_edrpou"], alias: "avg_monthly_salary_period", numerator: "сума зарплати за вибрані місяці", denominator: "кількість людино-місяців", unit: "грн на місяць", period: "вибраний період" },
+    { id: "median_monthly_salary_period", salaryMetric: true, label: "Медіанна місячна зарплата за період", tables: ["t6_2026_edrpou"], alias: "median_monthly_salary_period", numerator: "медіана місячної зарплати після приведення до вибраного зерна", denominator: "не застосовується", unit: "грн на місяць", period: "вибраний період" },
     { id: "avg_monthly_salary_year", salaryMetric: true, label: "Середньомісячна зарплата за рік", tables: ["t6_2026_edrpou"], alias: "avg_monthly_salary_year", numerator: "річний фонд зарплати", denominator: "кількість активних людино-місяців року", unit: "грн на місяць", period: "календарний рік" },
-    { id: "avg_annual_salary", salaryMetric: true, label: "Середньорічна зарплата", tables: ["t6_2026_edrpou"], alias: "avg_annual_salary", numerator: "12 × річний фонд зарплати", denominator: "сума місячної чисельності", unit: "грн на рік", period: "повний календарний рік" },
+    { id: "avg_annual_salary", salaryMetric: true, label: "Річний еквівалент середньомісячної зарплати", tables: ["t6_2026_edrpou"], alias: "avg_annual_salary", numerator: "12 × річний фонд зарплати", denominator: "сума місячної чисельності", unit: "грн на рік", period: "повний календарний рік" },
     { id: "avg_annual_income_per_person", salaryMetric: true, label: "Середній фактичний річний дохід особи", tables: ["t6_2026_edrpou"], alias: "avg_annual_income_per_person", numerator: "сума річних доходів осіб", denominator: "кількість унікальних осіб року", unit: "грн на рік", period: "рік" },
   ],
   systemFilters: [
-    { tables: ["sm_packlabel", "sm_ape4_6data"], expressions: ["{sm_packlabel}.slb_fixed = 'Y'", "{sm_packlabel}.slb_actuality = 'Y'", "{sm_packlabel}.slb_st = 'O'", "{sm_ape4_6data}.aped46_st = 'O'"] },
+    { id: "accepted_actual_packages", label: "Лише прийняті й актуальні пакети", description: "Відбирає зафіксовані актуальні прийняті пакети та прийняті рядки T6.", tables: ["sm_packlabel", "sm_ape4_6data"], expressions: ["{sm_packlabel}.slb_fixed = 'Y'", "{sm_packlabel}.slb_actuality = 'Y'", "{sm_packlabel}.slb_st = 'O'", "{sm_ape4_6data}.aped46_st = 'O'"] },
   ],
   semanticPresets: [
-    { id: "current_insurer_profile", label: "Актуальні реквізити та КВЕД страхувальника", mode: "current", tables: ["pinsur_main", "pinsur_chng_doc", "pinsur_kved_hst", "pinsur_kved"], filters: ["{pinsur_main}.im_st IN ('A', 'L')", "{pinsur_chng_doc}.ih_st_actual = 'A'", "{pinsur_kved}.iv_tp = 'Y'"], sourceFile: "наданий робочий SQL", description: "Чинний страхувальник, актуальний документ і КВЕД" },
+    { id: "current_insurer_profile", label: "Актуальні реквізити та КВЕД страхувальника", mode: "current", tables: ["pinsur_main", "pinsur_chng_doc", "pinsur_kved_hst", "pinsur_kved"], sourceFile: "наданий робочий SQL", description: "Чинний страхувальник, актуальний документ і КВЕД" },
   ],
   semanticRules: [
     { id: "current_insurer", table: "pinsur_main", mode: "current", predicates: ["{pinsur_main}.im_st IN ('A', 'L')"], sourceFile: "наданий робочий SQL", description: "Чинний запис страхувальника" },
@@ -709,22 +710,27 @@ window.SQL_SCHEMA = {
     latest_person_identity: {
       cte: "latest_person_identity AS (\n  SELECT *\n  FROM (\n    SELECT keyed.*, ROW_NUMBER() OVER (PARTITION BY sqlm_match_key ORDER BY modify_dt DESC NULLS LAST, ip_id DESC) AS sqlm_rn\n    FROM (\n      SELECT ipi_src.*,\n             CASE\n               WHEN TRIM(ipi_src.numident) IS NOT NULL THEN TRIM(ipi_src.numident)\n               WHEN TRIM(ipi_src.pass_serial) IS NOT NULL THEN 'БК' || UPPER(TRIM(ipi_src.pass_serial)) || TRIM(ipi_src.pass_number)\n               WHEN TRIM(ipi_src.pass_number) IS NOT NULL THEN 'П' || TRIM(ipi_src.pass_number)\n             END AS sqlm_match_key\n      FROM ikis_person.insured_person_info ipi_src\n    ) keyed\n  )\n  WHERE sqlm_rn = 1\n)",
       from: "latest_person_identity",
+      columns: ["sqlm_match_key"],
     },
     ape45_by_person: {
       cte: "ape45_by_person AS (\n  SELECT aped45_slb, aped45_numident,\n         MIN(aped45_start_dt) AS aped45_start_dt,\n         MAX(aped45_stop_dt) AS aped45_stop_dt,\n         COUNT(*) AS period_count\n  FROM ikis_websm.sm_ape4_5data\n  GROUP BY aped45_slb, aped45_numident\n)",
       from: "ape45_by_person",
+      columns: ["period_count"],
     },
     ape45_employment_with_period: {
       cte: "ape45_employment_with_period AS (\n  SELECT d5_src.*,\n         plb_src.slb_im AS sqlm_slb_im,\n         plb_src.slb_charg_year AS sqlm_year,\n         plb_src.slb_charg_mnth AS sqlm_month\n  FROM ikis_websm.sm_ape4_5data d5_src\n  JOIN ikis_websm.sm_packlabel plb_src\n    ON plb_src.slb_id = d5_src.aped45_slb\n)",
       from: "ape45_employment_with_period",
+      columns: ["sqlm_slb_im", "sqlm_year", "sqlm_month"],
     },
     ape45_latest_position_by_insurer: {
       cte: "ape45_latest_position_by_insurer AS (\n  SELECT *\n  FROM (\n    SELECT d5_src.*,\n           plb_src.slb_im AS sqlm_slb_im,\n           plb_src.slb_charg_year AS sqlm_year,\n           plb_src.slb_charg_mnth AS sqlm_month,\n           ROW_NUMBER() OVER (\n             PARTITION BY plb_src.slb_im, d5_src.aped45_numident\n             ORDER BY d5_src.aped45_date_hire DESC NULLS LAST,\n                      plb_src.slb_charg_year DESC,\n                      plb_src.slb_charg_mnth DESC,\n                      d5_src.aped45_recnum DESC\n           ) AS sqlm_position_rn\n    FROM ikis_websm.sm_ape4_5data d5_src\n    JOIN ikis_websm.sm_packlabel plb_src\n      ON plb_src.slb_id = d5_src.aped45_slb\n  )\n  WHERE sqlm_position_rn = 1\n)",
       from: "ape45_latest_position_by_insurer",
+      columns: ["sqlm_slb_im", "sqlm_year", "sqlm_month", "sqlm_position_rn"],
     },
     ape45_position_as_of_t6_month: {
       cte: "ape45_position_as_of_t6_month AS (\n  SELECT *\n  FROM (\n    SELECT d5_src.*,\n           plb_src.slb_im AS sqlm_slb_im,\n           t6_src.year AS sqlm_t6_year,\n           t6_src.aped46_mnth AS sqlm_t6_month,\n           t6_src.kat_zo AS sqlm_t6_kat_zo,\n           ROW_NUMBER() OVER (\n             PARTITION BY t6_src.slb_im, t6_src.kod_zo, t6_src.year, t6_src.aped46_mnth, t6_src.kat_zo\n             ORDER BY d5_src.aped45_date_hire DESC NULLS LAST,\n                      plb_src.slb_charg_year DESC,\n                      plb_src.slb_charg_mnth DESC,\n                      d5_src.aped45_recnum DESC\n           ) AS sqlm_position_rn\n    FROM vasiliuk_u.t6_2026_edrpou t6_src\n    JOIN ikis_websm.sm_packlabel plb_src\n      ON plb_src.slb_im = t6_src.slb_im\n     AND (plb_src.slb_charg_year * 100 + plb_src.slb_charg_mnth)\n         <= (t6_src.year * 100 + t6_src.aped46_mnth)\n    JOIN ikis_websm.sm_ape4_5data d5_src\n      ON d5_src.aped45_slb = plb_src.slb_id\n     AND d5_src.aped45_numident = t6_src.kod_zo\n    WHERE d5_src.aped45_date_hire IS NULL\n       OR d5_src.aped45_date_hire <= LAST_DAY(TO_DATE(t6_src.year || LPAD(t6_src.aped46_mnth, 2, '0'), 'YYYYMM'))\n  )\n  WHERE sqlm_position_rn = 1\n)",
       from: "ape45_position_as_of_t6_month",
+      columns: ["sqlm_slb_im", "sqlm_t6_year", "sqlm_t6_month", "sqlm_t6_kat_zo", "sqlm_position_rn"],
     },
   },
 };
@@ -783,7 +789,9 @@ window.SQL_SCHEMA.getTable = function (id) {
         return { leftCol: condition.leftCol.toLowerCase(), rightCol: condition.rightCol.toLowerCase() };
       }),
       type: "INNER",
-      isPhysicalForeignKey: true
+      isPhysicalForeignKey: true,
+      externalTarget: edge.unresolvedExternal === true,
+      isDefault: edge.unresolvedExternal === true ? false : edge.isDefault
     });
   });
   window.SQL_SCHEMA.physicalCatalog = physical;

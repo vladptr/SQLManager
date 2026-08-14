@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:#0f1419}iframe{display:block;border:0;width:100vw;height:1400px}</style></head>
+<body><iframe id="app" src="../index.html"></iframe><script>
+(function () {
+  var index = Math.max(0, Math.min(4, Number(location.hash.slice(1)) || 0));
+  document.getElementById("app").addEventListener("load", function () {
+    var frame = this;
+    setTimeout(function () {
+      var doc = frame.contentDocument;
+      var reports = doc.querySelectorAll(".ready-report-card");
+      if (reports[index]) reports[index].click();
+      if (frame.contentWindow.SQLManagerApp) frame.contentWindow.SQLManagerApp.goToStep(5);
+    }, 250);
+  });
+})();
+</script></body></html>

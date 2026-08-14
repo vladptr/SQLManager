@@ -75,9 +75,12 @@ powershell -ExecutionPolicy Bypass -File build-portable.ps1
 
 - `avg_salary_month`: `SUM(salary_month) / NULLIF(COUNT(*), 0)`, групування за роком і місяцем;
 - `avg_monthly_salary_period`: зважена формула на всіх людино-місяцях періоду;
+- `median_monthly_salary_period`: Oracle `MEDIAN(salary_month)` на місячних значеннях після приведення до зерна `person_month` або `person_employer_month`;
 - `avg_monthly_salary_year`: формула на людино-місяцях із групуванням за роком;
 - `avg_annual_salary`: `12 * SUM(salary_month) / NULLIF(COUNT(*), 0)`, лише для місяців 1–12 повного календарного року;
 - `avg_annual_income_per_person`: після `person_year` — `SUM(salary_year) / NULLIF(COUNT(*), 0)`.
+
+Режим `current` використовує підтверджені статуси `IM_ST`, `IH_ST_ACTUAL` та `IV_TP`. DDL не доводить, що вони завжди залишають рівно один головний КВЕД на страхувальника, тому порядок для штучної дедуплікації не вигадується. Перед використанням у продуктивній аналітиці потрібно виконати [контроль дублів](docs/control-current-kved-duplicates.sql) і погодити бізнес-правило, якщо він повертає рядки.
 
 Правило `reported` включає місячну одиницю, якщо у T6 є запис. Правило `positive_salary` застосовує `salary_month > 0` тільки після місячного підсумовування, тому сторнування не відкидається завчасно. Для КВЕД та історичних довідників агрегація відбувається до JOIN; небезпечний історичний `1:N` без режиму `current/latest/as_of_date` блокує генерацію показника. `DISTINCT` для маскування розмноження не застосовується.
 

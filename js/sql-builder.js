@@ -7,6 +7,12 @@ window.SqlBuilder = (function () {
   function col(alias, name) { return `${alias}.${name}`; }
   function escapeLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
   function unique(values) { return [...new Set(values)]; }
+  function reverseCardinality(value) {
+    return ({ "1:N": "N:1", "N:1": "1:N", "1:0..N": "0..N:1", "0..N:1": "1:0..N", "N:0..1": "0..1:N", "0..1:N": "N:0..1", "N:M": "M:N", "M:N": "N:M", "1:1": "1:1" })[value] || value;
+  }
+  function diagnostic(severity, code, message, affectedMetrics, action) {
+    return { severity, code, message, affectedMetrics: affectedMetrics || [], action: action || "" };
+  }
   function replaceAliases(expression, aliases) {
     return expression.replace(/\{([^}]+)\}/g, (_, id) => aliases[id] || `{${id}}`);
   }
@@ -59,6 +65,17 @@ window.SqlBuilder = (function () {
         variants: edge.variants || [],
         selectedVariant: (variant && variant.id) || "",
         };
+      }).filter(function (edge) {
+        const left = table(edge.left);
+        const right = table(edge.right);
+        if (!left || !right || edge.externalTarget || edge.unresolvedExternal) return false;
+        const sourceColumns = function (side, sourceKey) {
+          const source = sourceKey && SQL_SCHEMA.sources && SQL_SCHEMA.sources[sourceKey];
+          return new Set((side.columns || []).map((item) => String(item.name).toLowerCase()).concat((source && source.columns) || []).map((name) => String(name).toLowerCase()));
+        };
+        const leftColumns = sourceColumns(left, edge.leftSource);
+        const rightColumns = sourceColumns(right, edge.rightSource);
+        return edge.conditions.length > 0 && edge.conditions.every((condition) => leftColumns.has(String(condition.leftCol).toLowerCase()) && rightColumns.has(String(condition.rightCol).toLowerCase()));
       });
   }
 
@@ -129,7 +146,9 @@ window.SqlBuilder = (function () {
     if (graph.errors.length) return { ...graph, errors: graph.errors, warnings, ctes, joins: [], aliases: assignAliases(graph.allTables) };
     const aliases = assignAliases(graph.allTables);
     const edges = graph.edges;
-    const root = graph.root;
+    const preferredRoots = edges.map((edge) => edge.preferredRoot).filter((id) => graph.allTables.includes(id));
+    const leftJoinRoots = edges.filter((edge) => edge.type === "LEFT").map((edge) => edge.left);
+    const root = preferredRoots.includes(graph.root) ? graph.root : (leftJoinRoots.sort()[0] || preferredRoots.sort()[0] || graph.root);
     const visited = new Set([root]);
     const joins = [];
     while (visited.size < graph.allTables.length) {
@@ -156,14 +175,16 @@ window.SqlBuilder = (function () {
       const sourceKey = forward ? edge.rightSource : edge.leftSource;
       const source = sourceKey && SQL_SCHEMA.sources ? SQL_SCHEMA.sources[sourceKey] : null;
       if (source && source.cte && !ctes.includes(source.cte)) ctes.push(source.cte);
-      const joinType = forward ? edge.type : ({ LEFT: "RIGHT", RIGHT: "LEFT" }[edge.type] || edge.type);
+      if (!forward && edge.type === "LEFT") {
+        errors.push(`Маршрут ${edge.left} → ${edge.right} потребує збереження напрямку LEFT JOIN. Змініть кореневе джерело або маршрут.`);
+        return { ...graph, errors, warnings, ctes, root, joins: [], aliases };
+      }
+      const joinType = edge.type === "RIGHT" ? "LEFT" : edge.type;
       const conditions = edge.conditions.map((condition) => forward
         ? `${col(aliases[parent], condition.leftCol)} = ${col(aliases[child], condition.rightCol)}`
         : `${col(aliases[parent], condition.rightCol)} = ${col(aliases[child], condition.leftCol)}`);
       joins.push({ table: child, sourceName: (source && source.from) || table(child).fullName, alias: aliases[child], type: joinType, conditions, edge, forward });
-      const orientedCardinality = forward || edge.cardinality === "N:M"
-        ? edge.cardinality
-        : edge.cardinality.split("").reverse().join("");
+      const orientedCardinality = forward ? edge.cardinality : reverseCardinality(edge.cardinality);
       if (orientedCardinality.endsWith(":N") || orientedCardinality === "N:M") {
         warnings.push(`Зв’язок ${(table(parent) || {}).label} → ${(table(child) || {}).label} має кардинальність ${orientedCardinality} і може розмножити рядки.`);
       }
@@ -176,9 +197,13 @@ window.SqlBuilder = (function () {
       const rootSource = rootSourceKey && SQL_SCHEMA.sources ? SQL_SCHEMA.sources[rootSourceKey] : null;
       if (rootSource && rootSource.cte && !ctes.includes(rootSource.cte)) ctes.push(rootSource.cte);
     }
-    const hasManyChain = joins.filter((join) => /:N$/.test(join.edge.cardinality)).length >= 2;
-    if (hasManyChain) warnings.push("У страхувальника може бути декілька документів змін та декілька записів КВЕД. Суми T6 можуть розмножитися.");
-    return { ...graph, errors, warnings: unique(warnings), ctes, root, joins, aliases };
+    const hasManyChain = joins.filter((join) => /(?:^|:)N|0\.\.N/.test(join.edge.cardinality)).length >= 2;
+    const diagnostics = [];
+    if (hasManyChain) diagnostics.push(diagnostic("warning", "FANOUT_RISK", "Маршрут містить кілька зв’язків один-до-багатьох і може розмножити рядки.", state.metrics || [], "Оберіть current або змініть зерно"));
+    if ((state.semanticMode === "current" || (state.presets || []).includes("current_insurer_profile")) && graph.allTables.includes("pinsur_kved")) {
+      diagnostics.push(diagnostic("warning", "CURRENT_KVED_UNIQUENESS", "Немає фізичного UNIQUE constraint для одного головного current-КВЕД. Зарплата може бути повторно віднесена до кількох КВЕД; загальний підсумок за КВЕД не вважайте достовірним до виконання контролю.", state.metrics || [], "Виконайте docs/control-current-kved-duplicates.sql і погодьте бізнес-правило"));
+    }
+    return { ...graph, errors, warnings: unique(warnings), diagnostics, ctes, root, joins, aliases };
   }
 
   function sourceForRoot(root, joins) {
@@ -284,12 +309,18 @@ window.SqlBuilder = (function () {
     const unsupportedMetricIds = (state.metrics || []).filter((id) => !selectedSalaryMetrics.some((metric) => metric.id === id) && !companionMetricIds.includes(id));
     const errors = [...plan.errors];
     const warnings = [...plan.warnings];
+    const diagnostics = [...(plan.diagnostics || [])];
     if (selectedSalaryMetrics.length > 1) errors.push("Одночасно можна вибрати лише один вид середньої зарплати.");
     if (unsupportedMetricIds.length) errors.push("З вибраним зарплатним показником ці показники поки несумісні: " + unsupportedMetricIds.join(", ") + ".");
     if (["ctas", "drop_ctas"].includes(state.mode) && !IDENTIFIER.test(String(state.targetTable || "").trim())) {
       errors.push("Назва CTAS-таблиці має бути коректним Oracle identifier: TABLE або SCHEMA.TABLE.");
     }
     if (!selected.includes("t6_2026_edrpou")) errors.push("Зарплатний показник потребує джерело T6_2026_EDRPOU.");
+    if (salaryMetric.id === "avg_annual_income_per_person") {
+      if (companionMetrics.length) errors.push("Фактичний середній річний дохід особи не можна поєднувати з іншими показниками в одному запиті: вони мають інше зерно.");
+      if (selected.some((id) => id !== "t6_2026_edrpou")) errors.push("Фактичний середній річний дохід особи поки не підтримує розрізи за КВЕД або іншими довідниками.");
+      if ((state.fields || []).some((field) => field.table === "t6_2026_edrpou" && ["slb_im", "edrpou"].includes(field.column) && !field.agg)) errors.push("Фактичний середній річний дохід особи не можна групувати за роботодавцем: CTE person_year має зерно особа–рік.");
+    }
     const grain = state.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
     if (companionMetrics.some((metric) => metric.id === "insurers_count") && grain !== "person_employer_month") {
       errors.push("Кількість страхувальників потребує рівень «одна особа в одного страхувальника за місяць».");
@@ -298,9 +329,11 @@ window.SqlBuilder = (function () {
       errors.push("Для довідників підприємства або КВЕД виберіть рівень «одна особа в одного страхувальника за місяць».");
     }
     const hasHistoryRisk = (plan.joins || []).some((join) => /:N$|N:M/.test(join.edge.cardinality));
-    const currentMode = (state.presets || []).includes("current_insurer_profile");
-    if (hasHistoryRisk && !currentMode) {
-      errors.push("Історичний JOIN може розмножити зарплату. Виберіть semantic mode current/latest/as_of_date або явно підтверджений all_history.");
+    const semanticMode = state.semanticMode || ((state.presets || []).includes("current_insurer_profile") ? "current" : null);
+    if (semanticMode && !['current', 'all_history'].includes(semanticMode)) errors.push("Непідтримуваний semantic mode. Доступні лише current та all_history.");
+    if (semanticMode === "all_history" && state.allHistoryConfirmed !== true) errors.push("Режим «Усі історичні версії» потребує явного підтвердження ризику розмноження рядків.");
+    if (hasHistoryRisk && semanticMode !== "current" && state.allHistoryConfirmed !== true) {
+      diagnostics.push(diagnostic("error", "FANOUT_RISK", "Історичний маршрут може розмножити зарплатні значення.", state.metrics || [], "Оберіть current або явно підтвердьте all_history"));
     }
     if (salaryMetric.id === "avg_annual_salary") {
       const monthFilter = (state.filters || []).find((filter) => filter.table === "t6_2026_edrpou" && filter.column === "aped46_mnth" && filter.op === "BETWEEN");
@@ -312,7 +345,8 @@ window.SqlBuilder = (function () {
     const rawDimensionColumns = unique((state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && safeRawDimensions.includes(field.column) && !field.agg).map((field) => field.column));
     const unsupportedFields = (state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && !["year", "aped46_mnth", "kod_zo", "slb_im", "edrpou"].concat(safeRawDimensions).includes(field.column));
     if (unsupportedFields.length) errors.push("Для зарплатної метрики поля сум і категорій не можна виводити до приведення до місячного зерна.");
-    if (errors.length) return { sql: "", errors: unique(errors), warnings: unique(warnings), aliases: plan.aliases, graph: plan };
+    if (diagnostics.some((item) => item.severity === "error")) diagnostics.filter((item) => item.severity === "error").forEach((item) => errors.push(item.message));
+    if (errors.length) return { sql: "", errors: unique(errors), warnings: unique(warnings), diagnostics, aliases: plan.aliases, graph: plan };
 
     const rawErrors = [];
     const rawState = Object.assign({}, state, { filters: (state.filters || []).filter((filter) => filter.table === "t6_2026_edrpou") });
@@ -337,13 +371,11 @@ window.SqlBuilder = (function () {
     (plan.joins || []).forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
     const outerState = Object.assign({}, state, { filters: (state.filters || []).filter((filter) => filter.table !== "t6_2026_edrpou") });
     const outerWhere = buildFilters(outerState, plan.aliases, errors);
-    (state.presets || []).forEach((presetId) => {
-      const preset = (SQL_SCHEMA.semanticPresets || []).find((item) => item.id === presetId);
-      if (preset && preset.tables.every((id) => plan.allTables.includes(id))) preset.filters.forEach((expression) => outerWhere.push(replaceAliases(expression, plan.aliases)));
-    });
+    if (semanticMode === "current") (SQL_SCHEMA.semanticRules || []).filter((rule) => rule.mode === "current" && plan.allTables.includes(rule.table)).forEach((rule) => rule.predicates.forEach((expression) => outerWhere.push(replaceAliases(expression, plan.aliases))));
     let formula = "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)";
     let mandatory = [];
     if (salaryMetric.id === "avg_salary_month") mandatory = ["year", "aped46_mnth"];
+    if (salaryMetric.id === "median_monthly_salary_period") formula = "MEDIAN(t6.salary_month)";
     if (salaryMetric.id === "avg_monthly_salary_year" || salaryMetric.id === "avg_annual_salary" || salaryMetric.id === "avg_annual_income_per_person") mandatory = ["year"];
     if (salaryMetric.id === "avg_annual_salary") formula = "12 * SUM(t6.salary_month) / NULLIF(COUNT(*), 0)";
     if (salaryMetric.id === "avg_annual_income_per_person") formula = "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)";
@@ -386,7 +418,7 @@ window.SqlBuilder = (function () {
       warnings.push(`Увага: DROP TABLE ${state.targetTable.trim()} PURGE безповоротно видалить поточну таблицю.`);
       sql = `DROP TABLE ${state.targetTable.trim()} PURGE;\n\nCREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
     }
-    return { sql, errors: unique(errors), warnings: unique(warnings), aliases: plan.aliases, graph: plan, salaryMetric };
+    return { sql, errors: unique(errors), warnings: unique(warnings), diagnostics, appliedPredicates: unique(outerWhere), aliases: plan.aliases, graph: plan, salaryMetric };
   }
 
   function build(state) {
@@ -395,6 +427,10 @@ window.SqlBuilder = (function () {
     const aliases = plan.aliases;
     const errors = [...plan.errors];
     const warnings = [...plan.warnings];
+    const diagnostics = [...(plan.diagnostics || [])];
+    const semanticMode = state.semanticMode || ((state.presets || []).includes("current_insurer_profile") ? "current" : null);
+    if (semanticMode && !["current", "all_history"].includes(semanticMode)) errors.push("Непідтримуваний semantic mode. Доступні лише current та all_history.");
+    if (semanticMode === "all_history" && state.allHistoryConfirmed !== true) errors.push("Режим «Усі історичні версії» потребує явного підтвердження ризику розмноження рядків.");
     if (errors.length) return { sql: "", errors, warnings, aliases, graph: plan };
     const salaryResult = buildSalaryMetric(state, selected, plan);
     if (salaryResult) return salaryResult;
@@ -402,15 +438,10 @@ window.SqlBuilder = (function () {
     const metrics = (state.metrics || []).map((id) => metricExpression(id, aliases)).filter(Boolean);
     validateCtas(state, selected, fields, metrics, errors);
     const where = buildFilters(state, aliases, errors);
-    (SQL_SCHEMA.systemFilters || []).forEach((rule) => {
+    (SQL_SCHEMA.systemFilters || []).filter((rule) => (state.qualityProfiles || []).includes(rule.id)).forEach((rule) => {
       if (rule.tables.every((id) => plan.allTables.includes(id))) rule.expressions.forEach((expression) => where.push(replaceAliases(expression, aliases)));
     });
-    (state.presets || []).forEach((presetId) => {
-      const preset = (SQL_SCHEMA.semanticPresets || []).find((item) => item.id === presetId);
-      if (!preset) return;
-      if (!preset.tables.every((id) => plan.allTables.includes(id))) errors.push(`Preset «${preset.label}» потребує джерел: ${preset.tables.join(", ")}.`);
-      else preset.filters.forEach((expression) => where.push(replaceAliases(expression, aliases)));
-    });
+    if (semanticMode === "current") (SQL_SCHEMA.semanticRules || []).filter((rule) => rule.mode === "current" && plan.allTables.includes(rule.table)).forEach((rule) => rule.predicates.forEach((expression) => where.push(replaceAliases(expression, aliases))));
     if (errors.length) return { sql: "", errors: unique(errors), warnings, aliases };
 
     const ctas = ["ctas", "drop_ctas"].includes(state.mode);
@@ -439,7 +470,7 @@ window.SqlBuilder = (function () {
       warnings.push(`Увага: DROP TABLE ${state.targetTable.trim()} PURGE безповоротно видалить поточну таблицю перед створенням нової.`);
       sql = `DROP TABLE ${state.targetTable.trim()} PURGE;\n\nCREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
     }
-    return { sql, errors: [], warnings: unique(warnings), aliases, graph: plan };
+    return { sql, errors: [], warnings: unique(warnings), diagnostics, appliedPredicates: unique(where), semanticMode, aliases, graph: plan };
   }
 
   function buildSelect(state) {
@@ -460,5 +491,5 @@ window.SqlBuilder = (function () {
     }));
   }
 
-  return { build, buildSelect, suggestJoinsForTables, assignAliases, resolveJoinGraph };
+  return { build, buildSelect, suggestJoinsForTables, assignAliases, resolveJoinGraph, reverseCardinality, normalizedEdges };
 })();

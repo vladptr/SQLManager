@@ -9,6 +9,7 @@
 <script src="../js/template-utils.js"></script>
 <script src="../js/preset-store.js"></script>
 <script src="../js/wizard-state.js"></script>
+<script src="salary-control-dataset.js"></script>
 <script>
   const results = [];
   function test(name, fn) {
@@ -32,6 +33,19 @@
     const a = result(state(["t6_2026_edrpou", "insured_person_info"]));
     const b = result(state(["insured_person_info", "t6_2026_edrpou"]));
     equal(a.sql, b.sql);
+  });
+  test("T6 is root and person info is LEFT JOIN without RIGHT JOIN", () => {
+    const r = result(state(["insured_person_info", "t6_2026_edrpou"]));
+    equal(r.errors.length, 0);
+    includes(r.sql, "FROM vasiliuk_u.t6_2026_edrpou t6");
+    includes(r.sql, "LEFT JOIN ikis_person.insured_person_info ipi");
+    if (/\bRIGHT JOIN\b/.test(r.sql)) throw new Error("RIGHT JOIN generated");
+  });
+  test("cardinality reversal is explicit", () => {
+    equal(SqlBuilder.reverseCardinality("1:N"), "N:1");
+    equal(SqlBuilder.reverseCardinality("1:0..N"), "0..N:1");
+    equal(SqlBuilder.reverseCardinality("N:0..1"), "0..1:N");
+    equal(SqlBuilder.reverseCardinality("N:M"), "M:N");
   });
   test("user preset stores only constructor configuration", () => {
     const data = {};
@@ -63,6 +77,22 @@
     const saved = SQLPresetStore.save(storage, "Тимчасовий", { tables: ["t6_2026_edrpou"] });
     equal(SQLPresetStore.remove(storage, saved.id), true);
     equal(SQLPresetStore.list(storage).length, 0);
+  });
+  test("preset v2 includes semantic contract and migrates v1", () => {
+    const snapshot = SQLPresetStore.snapshot({ tables: [], semanticMode: "all_history", allHistoryConfirmed: true, taskId: "payroll_esv", taskParameters: { year: 2026 }, qualityProfiles: ["accepted_actual_packages"] });
+    equal(snapshot.schemaVersion, 2); equal(snapshot.semanticMode, "all_history"); equal(snapshot.allHistoryConfirmed, true);
+    const migrated = SQLPresetStore.migrate({ id: "old", name: "old", state: { tables: [] } });
+    equal(migrated.state.schemaVersion, 2); equal(migrated.state.semanticMode, "all_history"); equal(migrated.state.allHistoryConfirmed, false);
+    const current = SQLPresetStore.migrate({ id: "old-current", name: "old-current", state: { presets: ["current_insurer_profile"] } });
+    equal(current.state.semanticMode, "current");
+  });
+  test("preset JSON export and import validates schema version", () => {
+    const data = {}; const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    SQLPresetStore.save(storage, "A", { tables: ["t6_2026_edrpou"], semanticMode: "current" });
+    const json = SQLPresetStore.exportJson(storage);
+    equal(SQLPresetStore.importJson(storage, json, () => true), 1);
+    let rejected = false; try { SQLPresetStore.importJson(storage, '{"schemaVersion":1,"presets":[]}'); } catch (_) { rejected = true; }
+    if (!rejected) throw new Error("Incompatible preset import accepted");
   });
   test("wizard preview hides later-step settings without deleting them", () => {
     const full = {
@@ -206,7 +236,34 @@
   });
   test("ланцюг 1:N до КВЕД попереджає про розмноження сум", () => {
     const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
-    if (!r.warnings.some((warning) => /Суми T6 можуть розмножитися/.test(warning))) throw new Error("Немає спеціального попередження");
+    const item = (r.diagnostics || []).find((diagnostic) => diagnostic.code === "FANOUT_RISK");
+    if (!item || item.severity !== "warning" || !item.action) throw new Error("Немає структурованої FANOUT_RISK діагностики");
+  });
+  test("all_history requires explicit fanout confirmation", () => {
+    const blocked = result(state(["pinsur_main"], { semanticMode: "all_history" }));
+    if (!blocked.errors.length) throw new Error("all_history accepted without confirmation");
+    const accepted = result(state(["pinsur_main"], { semanticMode: "all_history", allHistoryConfirmed: true }));
+    equal(accepted.errors.length, 0);
+  });
+  test("quality profile system filters are explicit", () => {
+    const plain = result(state(["sm_packlabel", "sm_ape4_6data"]));
+    if (plain.sql.includes("plb.slb_fixed = 'Y'")) throw new Error("Hidden system filter applied");
+    const filtered = result(state(["sm_packlabel", "sm_ape4_6data"], { qualityProfiles: ["accepted_actual_packages"] }));
+    includes(filtered.sql, "plb.slb_fixed = 'Y'"); includes(filtered.sql, "pd.aped46_st = 'O'");
+    if (!(filtered.appliedPredicates || []).length) throw new Error("Applied predicates are not exposed");
+  });
+  test("external FK remains catalogued but is unavailable to routing", () => {
+    const external = SQL_SCHEMA.physicalJoins.find((edge) => edge.unresolvedExternal);
+    if (!external || !external.externalTarget || external.isDefault !== false) throw new Error("External FK metadata is incomplete");
+    if (SqlBuilder.normalizedEdges({}).some((edge) => edge.id === external.id)) throw new Error("External FK entered routing graph");
+  });
+  test("all routable catalog edges build without RIGHT JOIN", () => {
+    const pairs = new Set(SqlBuilder.normalizedEdges({}).filter((edge) => edge.isDefault).map((edge) => [edge.left, edge.right].sort().join("|")));
+    pairs.forEach((key) => {
+      const ids = key.split("|"); let r;
+      try { r = result(state(ids)); } catch (error) { throw new Error(`${key}: ${error.message}`); }
+      if (!r.errors.length && /\bRIGHT JOIN\b/.test(r.sql)) throw new Error(`RIGHT JOIN: ${key}`);
+    });
   });
 
   test("DDL: APE 4-5 data приєднується до заголовка за пакетом і сторінкою", () => {
@@ -375,6 +432,27 @@
     includes(r.sql, "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)");
     if (r.sql.includes("AVG(avg_salary_month)")) throw new Error("Unweighted average used");
   });
+  test("median monthly salary uses Oracle MEDIAN after monthly grain", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["median_monthly_salary_period"], salaryGrain: "person_month" }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_month AS");
+    includes(r.sql, 'MEDIAN(t6.salary_month) AS "median_monthly_salary_period"');
+    if (r.sql.includes("MEDIAN(t6_src.sum_narah)")) throw new Error("Median was calculated from raw T6 rows");
+  });
+  test("median salary supports employer grain and report dimensions", () => {
+    const r = result(state(["t6_2026_edrpou"], {
+      metrics: ["median_monthly_salary_period"],
+      salaryGrain: "person_employer_month",
+      fields: [
+        { table: "t6_2026_edrpou", column: "reg", agg: "" },
+        { table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }
+      ]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "FROM person_employer_month");
+    includes(r.sql, "MEDIAN(t6.salary_month)");
+    includes(r.sql, "GROUP BY\n       t6.reg,\n       t6.aped46_mnth");
+  });
   test("salary report appends ORDER BY for selected dimensions", () => {
     const fields = [
       { table: "t6_2026_edrpou", column: "reg", agg: "" },
@@ -407,6 +485,26 @@
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"] }));
     includes(r.sql, "person_year AS");
     includes(r.sql, "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)");
+  });
+  test("annual income rejects payroll companion", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person", "payroll"] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income + payroll was not blocked");
+  });
+  test("annual income rejects contributions companion", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person", "contributions"] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income + contributions was not blocked");
+  });
+  test("annual income rejects insurer count companion", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person", "insurers_count"], salaryGrain: "person_employer_month" }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income + insurer count was not blocked");
+  });
+  test("annual income rejects KVED breakdown", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], { metrics: ["avg_annual_income_per_person"], salaryGrain: "person_employer_month", presets: ["current_insurer_profile"], fields: [{ table: "nsi_kved", column: "kvd_code", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by KVED was not blocked");
+  });
+  test("annual income rejects employer breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "slb_im", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by employer was not blocked");
   });
   test("salary by KVED aggregates before dictionary joins", () => {
     const r = result(state(["t6_2026_edrpou", "nsi_kved"], {
@@ -498,6 +596,21 @@
     equal(january.reduce((sum, row) => sum + row.v, 0) / january.length, 20000);
     equal(rows.reduce((sum, row) => sum + row.v, 0) / rows.length, 20000);
     equal(rows.reduce((sum, row) => sum + row.v, 0) / new Set(rows.map(row => row.p)).size, 30000);
+  });
+  test("deterministic RC salary dataset matches all six metrics", () => {
+    SalaryControlDataset.cases.forEach((item) => {
+      const actual = SalaryControlDataset.metrics(item.rows, item.grain);
+      Object.keys(item.expected).forEach((metric) => equal(actual[metric], item.expected[metric], `${item.id}: ${metric}`));
+      if (item.employerGrainExpected) {
+        const employerActual = SalaryControlDataset.metrics(item.rows, "person_employer_month");
+        Object.keys(item.employerGrainExpected).forEach((metric) => equal(employerActual[metric], item.employerGrainExpected[metric], `${item.id} employer grain: ${metric}`));
+      }
+    });
+  });
+  test("duplicate current KVED fixture exposes payroll fanout", () => {
+    const item = SalaryControlDataset.cases.find((entry) => entry.id === "two_current_kved");
+    equal(item.rows[0].salary, item.expectedPayrollBeforeKved);
+    equal(item.rows[0].salary * item.currentKved.length, item.expectedPayrollAfterNaiveKvedJoin);
   });
 
   const failed = results.filter(x => !x.ok);

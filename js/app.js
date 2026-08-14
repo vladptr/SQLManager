@@ -8,6 +8,11 @@
     orderBy: [],
     metrics: [],
     presets: [],
+    semanticMode: "current",
+    allHistoryConfirmed: false,
+    qualityProfiles: [],
+    taskId: null,
+    taskParameters: null,
     latestPersonOnly: false,
     parallel8: false,
     salaryGrain: "person_month",
@@ -16,10 +21,18 @@
     targetTable: "work_result",
     catalogMode: "core",
     catalogQuery: "",
+    catalogLimit: 30,
     expandedCategories: new Set(),
   };
   let catalogRenderCount = 0;
   const MAX_STEP = 6;
+  const READY_REPORTS = [
+    { id: "salary_kved_region", label: "Середньомісячна зарплата за регіоном і актуальним КВЕД — потребує бізнес-правила", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["avg_monthly_salary_period"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
+    { id: "people_kved_month", label: "Кількість застрахованих осіб за місяцями та КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["people_count"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
+    { id: "payroll_esv", label: "Фонд зарплати й внески ЄСВ", tables: ["t6_2026_edrpou"], metrics: ["payroll", "contributions"], fields: [], grain: "person_month" },
+    { id: "current_insurer", label: "Поточний профіль страхувальника", tables: ["pinsur_main", "pinsur_ankt_a"], metrics: [], fields: [], grain: "person_employer_month" },
+    { id: "position_as_of_month", label: "Посада особи станом на місяць T6", tables: ["t6_2026_edrpou", "sm_ape4_5data"], metrics: [], fields: [], grain: "person_employer_month", route: "position_as_of_t6_month" }
+  ];
   const TEMPLATE_SCRIPTS = [
     {
       id: "t6_2026_edrpou",
@@ -184,11 +197,21 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const matches = SQL_CATALOG_UI.search(query);
       const sec = document.createElement("section");
       sec.className = "catalog-group search-results";
-      sec.innerHTML = `<h3>Результати пошуку — ${matches.length}</h3>`;
+      const heading = document.createElement("h3");
+      heading.textContent = `Результати пошуку — ${matches.length}`;
+      sec.appendChild(heading);
       const grid = document.createElement("div");
       grid.className = "card-grid";
-      matches.forEach((match) => grid.appendChild(createTableCard(match.table, match)));
+      matches.slice(0, state.catalogLimit).forEach((match) => grid.appendChild(createTableCard(match.table, match)));
       sec.appendChild(grid);
+      if (matches.length > state.catalogLimit) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "btn ghost catalog-show-more";
+        more.textContent = `Показати ще (${matches.length - state.catalogLimit})`;
+        more.addEventListener("click", function () { state.catalogLimit += 30; renderCatalog(); });
+        sec.appendChild(more);
+      }
       fragment.appendChild(sec);
     } else if (state.catalogMode === "core") {
       const core = SQL_SCHEMA.tables.filter((table) => SQL_CATALOG_UI.get(table).visibility === "core");
@@ -217,7 +240,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   function createCatalogSection(title, tables) {
     const sec = document.createElement("section");
     sec.className = "catalog-group";
-    sec.innerHTML = `<h3>${title} — ${tables.length}</h3>`;
+    const heading = document.createElement("h3");
+    heading.textContent = `${title} — ${tables.length}`;
+    sec.appendChild(heading);
     const grid = document.createElement("div");
     grid.className = "card-grid";
     const cards = document.createDocumentFragment();
@@ -237,7 +262,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     header.className = "category-toggle";
     header.dataset.category = category.id;
     header.setAttribute("aria-expanded", String(expanded));
-    header.innerHTML = `<span>${category.label}</span><span class="category-count" data-category-count="${category.id}">${tables.length} джерел, вибрано ${selected}</span><span class="category-arrow">⌄</span>`;
+    const categoryLabel = document.createElement("span"); categoryLabel.textContent = category.label;
+    const categoryCount = document.createElement("span"); categoryCount.className = "category-count"; categoryCount.dataset.categoryCount = category.id; categoryCount.textContent = `${tables.length} джерел, вибрано ${selected}`;
+    const arrow = document.createElement("span"); arrow.className = "category-arrow"; arrow.textContent = "⌄";
+    header.append(categoryLabel, categoryCount, arrow);
     sec.appendChild(header);
     if (expanded) {
       const grid = document.createElement("div");
@@ -255,15 +283,15 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     card.type = "button";
     card.dataset.tableId = table.id;
     card.className = "table-card" + (state.tables.includes(table.id) ? " selected" : "");
-    const tags = (ui.tags || []).slice(0, 4).map((tag) => `<span>${tag}</span>`).join("");
+    const role = ui.role || (ui.routeBridge ? "bridge" : ui.category === "directories" ? "довідник" : /history|_hst/i.test(ui.category + " " + table.fullName) ? "історія" : ui.visibility === "technical" ? "технічна" : "факт");
+    const availability = ui.availability || "доступна";
     card.innerHTML = `
-      <span class="card-badges"><span class="schema-badge">${ui.schema}</span>${ui.routeBridge ? '<span class="route-badge">Службова таблиця маршруту</span>' : ""}</span>
-      <span class="t-title">${ui.label}</span>
-      <span class="t-desc">${ui.description || table.description || ""}</span>
-      <span class="t-tech">${table.fullName}</span>
-      ${ui.grain ? `<span class="t-grain">Зерно: ${ui.grain}</span>` : ""}
-      ${tags ? `<span class="t-tags">${tags}</span>` : ""}
-      ${match ? `<span class="match-reason">Знайдено: ${match.reason}</span>` : ""}
+      <span class="card-badges"><span class="schema-badge">${safeText(ui.schema)}</span>${ui.routeBridge ? '<span class="route-badge">Автоматичний bridge</span>' : ""}</span>
+      <span class="t-title">${safeText(ui.label)}</span>
+      <span class="t-desc">${safeText(ui.description || table.description || "")}</span>
+      <span class="t-tech">${safeText(table.fullName)}</span>
+      <span class="t-grain">Зерно: ${safeText(ui.grain || "не описано")} · роль: ${safeText(role)} · ${safeText(availability)} · колонок: ${(table.columns || []).length}</span>
+      ${match ? `<span class="match-reason">Знайдено: ${safeText(match.reason)}</span>` : ""}
     `;
     return card;
   }
@@ -306,8 +334,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     el.innerHTML = state.tables
       .map(
         (id, idx) =>
-          `<span class="chip"><b>${idx + 1}.</b> ${tLabel(id)}
-          <button type="button" data-rm="${id}" title="Прибрати">×</button></span>`
+          `<span class="chip"><b>${idx + 1}.</b> ${safeText(tLabel(id))}
+          <button type="button" data-rm="${safeText(id)}" title="Прибрати">×</button></span>`
       )
       .join("");
     $$("[data-rm]", el).forEach((b) =>
@@ -337,6 +365,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#bridge-info").textContent = bridges.length
       ? `Автоматично додані проміжні таблиці: ${bridges.map(tLabel).join(", ")}`
       : "";
+    if (graph && graph.root) hint.textContent += ` Маршрут: ${[graph.root].concat((graph.joins || []).map((item) => item.table)).map(tLabel).join(" → ")}.`;
     ((graph && graph.edges) || []).forEach((edge, idx) => root.appendChild(joinRow({
       ...edge,
       leftTable: edge.left,
@@ -347,20 +376,20 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     const row = document.createElement("div");
     row.className = "join-row";
     const conditions = (j.conditions || []).map((condition) =>
-      `<div class="join-line"><code>${cLabel(j.leftTable, condition.leftCol)}</code><span class="join-word">=</span><code>${cLabel(j.rightTable, condition.rightCol)}</code></div>`
+      `<div class="join-line"><code>${safeText(cLabel(j.leftTable, condition.leftCol))}</code><span class="join-word">=</span><code>${safeText(cLabel(j.rightTable, condition.rightCol))}</code></div>`
     ).join("");
     const variants = (j.variants || []).map((variant) =>
-      `<option value="${variant.id}" ${variant.id === j.selectedVariant ? "selected" : ""}>${variant.label}</option>`
+      `<option value="${safeText(variant.id)}" ${variant.id === j.selectedVariant ? "selected" : ""}>${safeText(variant.label)}</option>`
     ).join("");
     row.innerHTML = `
       <div class="join-plain">
         <div class="join-line">
-          <strong>${tLabel(j.leftTable)}</strong><span class="join-word">→</span><strong>${tLabel(j.rightTable)}</strong>
+          <strong>${safeText(tLabel(j.leftTable))}</strong><span class="join-word">→</span><strong>${safeText(tLabel(j.rightTable))}</strong>
           <span class="badge">${j.type} · ${j.cardinality || "невідомо"}</span>
         </div>
         ${variants ? `<label class="join-line"><span class="join-word">Спосіб зіставлення:</span><select data-join-variant>${variants}</select></label>` : ""}
         ${conditions}
-        ${j.note ? `<div class="join-note">${j.note}</div>` : ""}
+        ${j.note ? `<div class="join-note">${safeText(j.note)}</div>` : ""}
       </div>
     `;
     const variantSelect = $("[data-join-variant]", row);
@@ -379,7 +408,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     return ((item && item.columns) || [])
       .map(
         (c) =>
-          `<option value="${c.name}" ${c.name === selected ? "selected" : ""}>${c.label}</option>`
+          `<option value="${safeText(c.name)}" ${c.name === selected ? "selected" : ""}>${safeText(c.label)}</option>`
       )
       .join("");
   }
@@ -407,7 +436,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const t = SQL_SCHEMA.getTable(tid);
       const box = document.createElement("div");
       box.className = "avail-group";
-      box.innerHTML = `<div class="avail-title">${t.label}</div>`;
+      box.innerHTML = `<div class="avail-title">${safeText(t.label)}</div>`;
       const chips = document.createElement("div");
       chips.className = "avail-chips";
       t.columns.forEach((c) => {
@@ -419,8 +448,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         btn.className = "avail-chip" + (already ? " used" : "");
         btn.disabled = already;
         btn.innerHTML = already
-          ? `<span>${c.label}</span><span class="chip-tag">вже додано</span>`
-          : `<span>${c.label}</span><span class="chip-plus">+</span>`;
+          ? `<span>${safeText(c.label)}</span><span class="chip-tag">вже додано</span>`
+          : `<span>${safeText(c.label)}</span><span class="chip-plus">+</span>`;
         btn.title = already ? "Уже у відповіді" : "Додати у відповідь";
         if (!already) {
           btn.addEventListener("click", () => {
@@ -458,8 +487,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       card.innerHTML = `
         <div class="chosen-num">${idx + 1}</div>
         <div class="chosen-body">
-          <div class="chosen-name">${cLabel(f.table, f.column)}</div>
-          <div class="chosen-from">з: ${tLabel(f.table)}</div>
+          <div class="chosen-name">${safeText(cLabel(f.table, f.column))}</div>
+          <div class="chosen-from">з: ${safeText(tLabel(f.table))}</div>
           <label class="chosen-op">
             <span>Що зробити з полем?</span>
             <select data-agg>${ops}</select>
@@ -545,10 +574,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
               return !selected || !selected.salaryMetric;
             });
           }
-          if (!wasSelected) {
-            const index = state.metrics.indexOf(metric.id);
-            if (index >= 0) state.metrics.splice(index, 1); else state.metrics.push(metric.id);
-          }
+          const index = state.metrics.indexOf(metric.id);
+          if (wasSelected && !metric.salaryMetric) state.metrics.splice(index, 1);
+          else if (!wasSelected) state.metrics.push(metric.id);
           renderMetrics();
           updateSql();
         });
@@ -564,8 +592,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $$('[name="salary-grain"]').forEach((radio) => { radio.checked = radio.value === state.salaryGrain; });
     $("#salary-population-rule").value = state.salaryPopulationRule;
     $("#salary-metric-explain").innerHTML =
-      `<b>Чисельник:</b> ${metric.numerator}. <b>Знаменник:</b> ${metric.denominator}. ` +
-      `<b>Період:</b> ${metric.period}. <b>Одиниця:</b> ${metric.unit}.`;
+      `<b>Зерно:</b> ${safeText(state.salaryGrain)}. <b>Чисельник:</b> ${safeText(metric.numerator)}. <b>Знаменник:</b> ${safeText(metric.denominator)}. ` +
+      `<b>Період:</b> ${safeText(metric.period)}. <b>Популяція:</b> ${safeText(state.salaryPopulationRule)}. <b>Одиниця:</b> ${safeText(metric.unit)}.`;
   }
   function isNumericColumn(tableId, colName) {
     const t = SQL_SCHEMA.getTable(tableId);
@@ -600,7 +628,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
             : "";
           return `<option value="f:${i}" ${
             o.fieldIndex === i ? "selected" : ""
-          }>${op}${cLabel(f.table, f.column)}</option>`;
+          }>${safeText(op)}${safeText(cLabel(f.table, f.column))}</option>`;
         })
         .join("");
     } else {
@@ -610,10 +638,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
           const val = `c:${tid}.${c.name}`;
           const selected =
             o.fieldIndex == null && o.table === tid && o.column === c.name;
-          fieldOpts += `<option value="${val}" ${selected ? "selected" : ""}>${cLabel(
+          fieldOpts += `<option value="${safeText(val)}" ${selected ? "selected" : ""}>${safeText(cLabel(
             tid,
             c.name
-          )}</option>`;
+          ))}</option>`;
         });
       });
     }
@@ -625,7 +653,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         (d) =>
           `<option value="${d.id}" ${
             (o.dir || "ASC") === d.id ? "selected" : ""
-          }>${d.label}</option>`
+          }>${safeText(d.label)}</option>`
       )
       .join("");
     row.innerHTML = `
@@ -788,13 +816,13 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     const tables = state.tables
       .map(
         (id) =>
-          `<option value="${id}" ${id === f.table ? "selected" : ""}>${tLabel(id)}</option>`
+          `<option value="${safeText(id)}" ${id === f.table ? "selected" : ""}>${safeText(tLabel(id))}</option>`
       )
       .join("");
     const ops = SQL_SCHEMA.operators
       .map(
         (o) =>
-          `<option value="${o.id}" ${o.id === f.op ? "selected" : ""}>${o.label}</option>`
+          `<option value="${safeText(o.id)}" ${o.id === f.op ? "selected" : ""}>${safeText(o.label)}</option>`
       )
       .join("");
     const needVal = f.op !== "IS NULL" && f.op !== "IS NOT NULL";
@@ -810,8 +838,8 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       <select data-k="table">${tables}</select>
       <select data-k="column">${colOptions(f.table, f.column)}</select>
       <select data-k="op">${ops}</select>
-      <input type="text" data-k="value" placeholder="${ph}" value="${
-        f.value || ""
+      <input type="text" data-k="value" placeholder="${safeText(ph)}" value="${
+        safeText(f.value || "")
       }" ${needVal ? "" : "disabled"} />
       <button type="button" class="btn danger icon" data-del>×</button>
     `;
@@ -837,13 +865,27 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   }
   function updateSql() {
     const sqlState = SQLWizardState.forStep(state, state.step);
+    if (!sqlState.tables.length) {
+      $("#sql-out").value = "";
+      const status = $("#sql-status"); status.className = "sql-status"; status.replaceChildren();
+      const paragraph = document.createElement("p"); paragraph.textContent = "Оберіть джерело або готовий звіт — SQL з’явиться тут."; status.appendChild(paragraph);
+      $("#sql-explain").innerHTML = "<p>Поки нічого не зібрано.</p>";
+      return;
+    }
     const result = SqlBuilder.build(sqlState);
     $("#sql-out").value = result.sql || result.errors.map((error) => `-- ПОМИЛКА: ${error}`).join("\n");
     const status = $("#sql-status");
     status.className = "sql-status" + (result.errors.length ? " error" : result.warnings.length ? " warning" : "");
-    status.innerHTML = result.errors.length
-      ? result.errors.map((error) => `<p><strong>Помилка:</strong> ${error}</p>`).join("")
-      : result.warnings.map((warning) => `<p><strong>Увага:</strong> ${warning}</p>`).join("");
+    status.replaceChildren();
+    const statusItems = result.errors.length ? result.errors.map((message) => ({ label: "Помилка", message }))
+      : (result.diagnostics || []).concat((result.warnings || []).map((message) => ({ severity: "warning", message }))).map((item) => ({ label: item.severity === "info" ? "Інформація" : "Увага", message: item.message, action: item.action }));
+    statusItems.forEach((item) => {
+      const paragraph = document.createElement("p");
+      const strong = document.createElement("strong"); strong.textContent = item.label + ": ";
+      paragraph.appendChild(strong); paragraph.appendChild(document.createTextNode(String(item.message || "")));
+      if (item.action) paragraph.appendChild(document.createTextNode(" Дія: " + item.action + "."));
+      status.appendChild(paragraph);
+    });
     $("#sql-explain").innerHTML = buildExplain(result, sqlState);
   }
   function buildExplain(result, sqlState) {
@@ -851,15 +893,15 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     if (!current.tables.length) return "<p>Поки нічого не зібрано.</p>";
     const lines = [];
     lines.push(
-      `<li><b>Джерела:</b> ${current.tables.map(tLabel).join("; ")}</li>`
+      `<li><b>Джерела:</b> ${current.tables.map((id) => safeText(tLabel(id))).join("; ")}</li>`
     );
     const resolvedEdges = (result && result.graph && result.graph.edges) || [];
     if (resolvedEdges.length) {
       lines.push(
         `<li><b>З’єднання:</b> ${resolvedEdges
           .map(
-            (j) => `${tLabel(j.left)} ↔ ${tLabel(j.right)}: ${(j.conditions || []).map((condition) =>
-              `[${cLabel(j.left, condition.leftCol)}] = [${cLabel(j.right, condition.rightCol)}]`
+            (j) => `${safeText(tLabel(j.left))} ↔ ${safeText(tLabel(j.right))}: ${(j.conditions || []).map((condition) =>
+              `[${safeText(cLabel(j.left, condition.leftCol))}] = [${safeText(cLabel(j.right, condition.rightCol))}]`
             ).join(" AND ")}`
           )
           .join("; ")}</li>`
@@ -872,7 +914,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
             const a = f.agg
               ? ((SQL_SCHEMA.aggregates.find((x) => x.id === f.agg) || {}).label || "") + " — "
               : "";
-            return a + cLabel(f.table, f.column);
+            return safeText(a) + safeText(cLabel(f.table, f.column));
           })
           .join("; ")}</li>`
       );
@@ -882,7 +924,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     if (current.metrics.length) {
       lines.push(`<li><b>Показники:</b> ${current.metrics.map((id) => {
         const metric = SQL_SCHEMA.metrics.find((item) => item.id === id);
-        return (metric && metric.label) || id;
+        return safeText((metric && metric.label) || id);
       }).join("; ")}</li>`);
       const salaryMetric = SQL_SCHEMA.metrics.find((item) => current.metrics.includes(item.id) && item.salaryMetric);
       if (salaryMetric) {
@@ -892,14 +934,17 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         const populationLabel = current.salaryPopulationRule === "positive_salary"
           ? "місячна зарплата після агрегації та сторнувань більша нуля"
           : "є запис у T6 за місяць";
-        lines.push(`<li><b>Чисельник:</b> ${salaryMetric.numerator}</li>`);
-        lines.push(`<li><b>Знаменник:</b> ${salaryMetric.denominator}</li>`);
-        lines.push(`<li><b>Рівень:</b> ${grainLabel}</li>`);
-        lines.push(`<li><b>Період:</b> ${salaryMetric.period}; <b>одиниця:</b> ${salaryMetric.unit}</li>`);
-        lines.push(`<li><b>Активний працівник:</b> ${populationLabel}</li>`);
-        lines.push(`<li><b>Semantic mode:</b> ${current.presets.includes("current_insurer_profile") ? "current" : "не вибрано"}</li>`);
+        lines.push(`<li><b>Чисельник:</b> ${safeText(salaryMetric.numerator)}</li>`);
+        lines.push(`<li><b>Знаменник:</b> ${safeText(salaryMetric.denominator)}</li>`);
+        lines.push(`<li><b>Рівень:</b> ${safeText(grainLabel)}</li>`);
+        lines.push(`<li><b>Період:</b> ${safeText(salaryMetric.period)}; <b>одиниця:</b> ${safeText(salaryMetric.unit)}</li>`);
+        lines.push(`<li><b>Активний працівник:</b> ${safeText(populationLabel)}</li>`);
+        lines.push(`<li><b>Semantic mode:</b> ${safeText(current.semanticMode || "current")}</li>`);
       }
     }
+    const quality = (SQL_SCHEMA.systemFilters || []).filter((profile) => (current.qualityProfiles || []).includes(profile.id));
+    if (quality.length) lines.push(`<li><b>Профілі якості:</b> ${quality.map((item) => safeText(item.label)).join("; ")}</li>`);
+    if (result && result.appliedPredicates && result.appliedPredicates.length) lines.push(`<li><b>Автоматичні предикати:</b> ${result.appliedPredicates.map(safeText).join("; ")}</li>`);
     if (current.orderBy.length) {
       lines.push(`<li><b>Сортування:</b> ${current.orderBy.length} правил(а)</li>`);
     }
@@ -909,7 +954,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
           .map((f) => {
             const op =
               (SQL_SCHEMA.operators.find((o) => o.id === f.op) || {}).label || f.op;
-            return `${cLabel(f.table, f.column)} ${op} ${f.value || "…"}`;
+            return `${safeText(cLabel(f.table, f.column))} ${safeText(op)} ${safeText(f.value || "…")}`;
           })
           .join("; ")}</li>`
       );
@@ -917,7 +962,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     const modeLabel =
       (SQL_SCHEMA.outputModes.find((m) => m.id === current.mode) || {}).label ||
       current.mode;
-    lines.push(`<li><b>Дія:</b> ${modeLabel}</li>`);
+    lines.push(`<li><b>Дія:</b> ${safeText(modeLabel)}</li>`);
     return `<ul>${lines.join("")}</ul>`;
   }
   function go(delta) {
@@ -971,6 +1016,11 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       orderBy: [],
       metrics: [],
       presets: [],
+      semanticMode: "current",
+      allHistoryConfirmed: false,
+      qualityProfiles: [],
+      taskId: null,
+      taskParameters: null,
       latestPersonOnly: false,
       parallel8: false,
       salaryGrain: "person_month",
@@ -985,7 +1035,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     renderCatalog();
     renderSelectedStrip();
     renderModeUi();
-    $("#preset-current-insurer").checked = false;
+    $("#semantic-mode").value = "current";
+    $("#all-history-confirmed").checked = false;
+    $("#all-history-confirm-wrap").hidden = true;
+    $("#quality-accepted-packages").checked = false;
     $("#filter-latest-person").checked = false;
     $("#use-parallel-8").checked = false;
     syncSteps();
@@ -1064,6 +1117,46 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       notify(error.message || "Не вдалося зберегти пресет", false);
     }
   }
+  function renderReadyReports() {
+    const root = $("#ready-report-list"); if (!root) return; root.replaceChildren();
+    READY_REPORTS.forEach((report) => {
+      const button = document.createElement("button"); button.type = "button"; button.className = "ready-report-card"; button.textContent = report.label;
+      button.addEventListener("click", () => applyReadyReport(report)); root.appendChild(button);
+    });
+  }
+  function applyReadyReport(report) {
+    const year = Math.max(2000, Math.min(2100, Number($("#ready-year").value) || 2026));
+    const monthFrom = Math.max(1, Math.min(12, Number($("#ready-month-from").value) || 1));
+    const monthTo = Math.max(monthFrom, Math.min(12, Number($("#ready-month-to").value) || 12));
+    const region = $("#ready-region").value.trim(); const grain = $("#ready-grain").value; const populationRule = $("#ready-population").value; const semanticMode = $("#ready-semantic-mode").value;
+    state.taskId = report.id; state.taskParameters = { year, monthFrom, monthTo, region: region || null, grain, populationRule, semanticMode };
+    state.tables = report.tables.slice(); state.metrics = report.metrics.slice(); state.fields = report.fields.map((item) => ({ ...item })); state.filters = [];
+    if (state.tables.includes("t6_2026_edrpou")) {
+      state.filters.push({ table: "t6_2026_edrpou", column: "year", op: "=", value: String(year) });
+      state.filters.push({ table: "t6_2026_edrpou", column: "aped46_mnth", op: "BETWEEN", value: `${monthFrom},${monthTo}` });
+      if (region) state.filters.push({ table: "t6_2026_edrpou", column: "reg", op: "=", value: region });
+    }
+    state.salaryGrain = grain || report.grain; state.salaryPopulationRule = populationRule; state.semanticMode = semanticMode; state.allHistoryConfirmed = false; state.presets = semanticMode === "current" ? ["current_insurer_profile"] : [];
+    $("#semantic-mode").value = semanticMode; $("#all-history-confirm-wrap").hidden = semanticMode !== "all_history"; $("#all-history-confirmed").checked = false;
+    state.joins = report.route ? [{ id: "t6_work_to_employment_ape45", selectedVariant: report.route }] : [];
+    renderCatalog(); renderSelectedStrip(); updateSql(); notify("Готовий звіт застосовано");
+  }
+  function presetCompatible(saved) {
+    return (saved.tables || []).every(function (id) { return !!SQL_SCHEMA.getTable(id); }) &&
+      (saved.metrics || []).every(function (id) { return SQL_SCHEMA.metrics.some(function (metric) { return metric.id === id; }); });
+  }
+  function exportUserPresets() {
+    const blob = new Blob([SQLPresetStore.exportJson(localStorage)], { type: "application/json;charset=utf-8" });
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "sqlmanager-presets-v2.json"; link.click(); URL.revokeObjectURL(link.href);
+  }
+  function importUserPresets(file) {
+    const reader = new FileReader();
+    reader.onload = function () {
+      try { const count = SQLPresetStore.importJson(localStorage, reader.result, presetCompatible); renderSavedPresets(); notify(`Імпортовано пресетів: ${count}`); }
+      catch (error) { notify(error.message || "Не вдалося імпортувати пресети", false); }
+    };
+    reader.readAsText(file, "UTF-8");
+  }
   function loadUserPreset(id) {
     const preset = SQLPresetStore.get(localStorage, id);
     if (!preset) {
@@ -1089,6 +1182,12 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       return metric && metric.tables.every(function (tableId) { return tables.includes(tableId); });
     });
     state.presets = (saved.presets || []).filter(function (id) { return SQL_SCHEMA.semanticPresets.some(function (item) { return item.id === id; }); });
+    state.semanticMode = ["current", "all_history"].includes(saved.semanticMode) ? saved.semanticMode : "current";
+    state.allHistoryConfirmed = state.semanticMode === "all_history" && saved.allHistoryConfirmed === true;
+    state.taskId = saved.taskId || null;
+    state.taskParameters = saved.taskParameters && typeof saved.taskParameters === "object"
+      ? JSON.parse(JSON.stringify(saved.taskParameters)) : null;
+    state.qualityProfiles = (saved.qualityProfiles || []).filter(function (id) { return SQL_SCHEMA.systemFilters.some(function (item) { return item.id === id; }); });
     state.latestPersonOnly = saved.latestPersonOnly === true;
     state.parallel8 = saved.parallel8 === true;
     state.salaryGrain = saved.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
@@ -1097,7 +1196,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     state.targetTable = String(saved.targetTable || "work_result");
     $("#mode-select").value = state.mode;
     $("#target-table").value = state.targetTable;
-    $("#preset-current-insurer").checked = state.presets.includes("current_insurer_profile");
+    $("#semantic-mode").value = state.semanticMode;
+    $("#all-history-confirm-wrap").hidden = state.semanticMode !== "all_history";
+    $("#all-history-confirmed").checked = state.allHistoryConfirmed;
+    $("#quality-accepted-packages").checked = state.qualityProfiles.includes("accepted_actual_packages");
     $("#filter-latest-person").checked = state.latestPersonOnly;
     $("#use-parallel-8").checked = state.parallel8;
     renderCatalog();
@@ -1164,15 +1266,29 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       if (!q) return true;
       return String(item.code).includes(q) || String(item.label || "").toLowerCase().includes(q);
     });
-    root.innerHTML = items.length
-      ? items.map((item) =>
-          `<div class="zo-cat-row">
-            <span class="zo-cat-code">${item.code}</span>
-            <span class="zo-cat-label">${item.label}</span>
-            ${zoCategoryTag(item.code)}
-          </div>`
-        ).join("")
-      : `<p class="muted">Нічого не знайдено.</p>`;
+    root.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "Нічого не знайдено.";
+      root.appendChild(empty);
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement("div"); row.className = "zo-cat-row";
+      const code = document.createElement("span"); code.className = "zo-cat-code"; code.textContent = String(item.code);
+      const label = document.createElement("span"); label.className = "zo-cat-label"; label.textContent = String(item.label || "");
+      row.append(code, label);
+      const groups = SQL_SCHEMA.zoFilterGroups || {};
+      const tagClass = (groups.military || []).indexOf(item.code) >= 0 ? "military"
+        : (groups.disability || []).indexOf(item.code) >= 0 ? "disability" : "";
+      if (tagClass) {
+        const tag = document.createElement("span"); tag.className = "zo-cat-tag " + tagClass;
+        tag.textContent = tagClass === "military" ? "військові" : "інвалідність";
+        row.appendChild(tag);
+      }
+      root.appendChild(row);
+    });
   }
   function openZoCategoryHelp() {
     const overlay = $("#zo-category-dialog");
@@ -1224,8 +1340,17 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       state.targetTable = e.target.value.trim() || "work_result";
       updateSql();
     });
-    $("#preset-current-insurer").addEventListener("change", (event) => {
-      state.presets = event.target.checked ? ["current_insurer_profile"] : [];
+    $("#semantic-mode").addEventListener("change", (event) => {
+      state.semanticMode = event.target.value;
+      state.presets = state.semanticMode === "current" ? ["current_insurer_profile"] : [];
+      state.allHistoryConfirmed = false;
+      $("#all-history-confirmed").checked = false;
+      $("#all-history-confirm-wrap").hidden = state.semanticMode !== "all_history";
+      updateSql();
+    });
+    $("#all-history-confirmed").addEventListener("change", (event) => { state.allHistoryConfirmed = event.target.checked; updateSql(); });
+    $("#quality-accepted-packages").addEventListener("change", (event) => {
+      state.qualityProfiles = event.target.checked ? ["accepted_actual_packages"] : [];
       updateSql();
     });
     $("#filter-latest-person").addEventListener("change", (event) => {
@@ -1281,10 +1406,14 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       notify("Збережено");
     });
     $("#btn-save-preset").addEventListener("click", saveUserPreset);
+    $("#btn-export-presets").addEventListener("click", exportUserPresets);
+    $("#btn-import-presets").addEventListener("click", () => $("#preset-import-file").click());
+    $("#preset-import-file").addEventListener("change", (event) => { if (event.target.files[0]) importUserPresets(event.target.files[0]); event.target.value = ""; });
     $("#btn-reset").addEventListener("click", resetAll);
     bindZoCategoryHelp();
     $("#search-tables").addEventListener("input", (e) => {
       state.catalogQuery = e.target.value.trim();
+      state.catalogLimit = 30;
       renderCatalog();
     });
     $("#catalog-modes").addEventListener("click", (event) => {
@@ -1315,6 +1444,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   function init() {
     try {
       bind();
+      renderReadyReports();
       renderCatalog();
       renderSelectedStrip();
       renderModeUi();
@@ -1339,11 +1469,15 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
           renderCatalog();
         },
         toggleTable,
+        goToStep,
       };
     } catch (error) {
       const catalog = document.querySelector("#table-catalog");
       if (catalog) {
-        catalog.innerHTML = `<p class="error-message"><strong>Помилка запуску конструктора:</strong> ${String(error && error.message ? error.message : error)}</p>`;
+        catalog.replaceChildren();
+        const message = document.createElement("p"); message.className = "error-message";
+        message.textContent = "Помилка запуску конструктора: " + String(error && error.message ? error.message : error);
+        catalog.appendChild(message);
       }
       throw error;
     }

@@ -20,6 +20,9 @@
     if (step < 2) {
       result.joins = [];
       result.presets = [];
+      result.semanticMode = "current";
+      result.allHistoryConfirmed = false;
+      result.qualityProfiles = [];
       result.mode = "select";
       result.targetTable = "work_result";
     }
