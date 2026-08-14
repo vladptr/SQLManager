@@ -13,6 +13,10 @@
     qualityProfiles: [],
     taskId: null,
     taskParameters: null,
+    t6Years: [2026],
+    t6MonthFrom: 1,
+    t6MonthTo: 12,
+    t6Region: "",
     latestPersonOnly: false,
     parallel8: false,
     salaryGrain: "person_month",
@@ -1021,6 +1025,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       qualityProfiles: [],
       taskId: null,
       taskParameters: null,
+      t6Years: [2026],
+      t6MonthFrom: 1,
+      t6MonthTo: 12,
+      t6Region: "",
       latestPersonOnly: false,
       parallel8: false,
       salaryGrain: "person_month",
@@ -1032,6 +1040,11 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       expandedCategories: new Set(),
     });
     $("#search-tables").value = "";
+    setT6Years([2026]);
+    $("#ready-month-from").value = "1";
+    $("#ready-month-to").value = "12";
+    $("#ready-grain").value = "person_month";
+    $("#ready-region").value = "";
     renderCatalog();
     renderSelectedStrip();
     renderModeUi();
@@ -1124,18 +1137,22 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       button.addEventListener("click", () => applyReadyReport(report)); root.appendChild(button);
     });
   }
+  function readT6Years() {
+    return $$('input[type="checkbox"]', $("#ready-years")).filter((input) => input.checked).map((input) => Number(input.value)).sort();
+  }
+  function setT6Years(years) {
+    const selected = new Set((years || []).map(Number));
+    $$('input[type="checkbox"]', $("#ready-years")).forEach((input) => { input.checked = selected.has(Number(input.value)); });
+  }
   function applyReadyReport(report) {
-    const year = Math.max(2000, Math.min(2100, Number($("#ready-year").value) || 2026));
+    const years = readT6Years();
+    const year = years.length === 1 ? years[0] : null;
     const monthFrom = Math.max(1, Math.min(12, Number($("#ready-month-from").value) || 1));
     const monthTo = Math.max(monthFrom, Math.min(12, Number($("#ready-month-to").value) || 12));
     const region = $("#ready-region").value.trim(); const grain = $("#ready-grain").value; const populationRule = $("#ready-population").value; const semanticMode = $("#ready-semantic-mode").value;
-    state.taskId = report.id; state.taskParameters = { year, monthFrom, monthTo, region: region || null, grain, populationRule, semanticMode };
+    state.t6Years = years; state.t6MonthFrom = monthFrom; state.t6MonthTo = monthTo; state.t6Region = region;
+    state.taskId = report.id; state.taskParameters = { years: years.slice(), monthFrom, monthTo, region: region || null, grain, populationRule, semanticMode };
     state.tables = report.tables.slice(); state.metrics = report.metrics.slice(); state.fields = report.fields.map((item) => ({ ...item })); state.filters = [];
-    if (state.tables.includes("t6_2026_edrpou")) {
-      state.filters.push({ table: "t6_2026_edrpou", column: "year", op: "=", value: String(year) });
-      state.filters.push({ table: "t6_2026_edrpou", column: "aped46_mnth", op: "BETWEEN", value: `${monthFrom},${monthTo}` });
-      if (region) state.filters.push({ table: "t6_2026_edrpou", column: "reg", op: "=", value: region });
-    }
     state.salaryGrain = grain || report.grain; state.salaryPopulationRule = populationRule; state.semanticMode = semanticMode; state.allHistoryConfirmed = false; state.presets = semanticMode === "current" ? ["current_insurer_profile"] : [];
     $("#semantic-mode").value = semanticMode; $("#all-history-confirm-wrap").hidden = semanticMode !== "all_history"; $("#all-history-confirmed").checked = false;
     state.joins = report.route ? [{ id: "t6_work_to_employment_ape45", selectedVariant: report.route }] : [];
@@ -1187,10 +1204,19 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     state.taskId = saved.taskId || null;
     state.taskParameters = saved.taskParameters && typeof saved.taskParameters === "object"
       ? JSON.parse(JSON.stringify(saved.taskParameters)) : null;
+    state.t6Years = Array.isArray(saved.t6Years) && saved.t6Years.length ? saved.t6Years.slice() : [2026];
+    state.t6MonthFrom = Math.max(1, Math.min(12, Number(saved.t6MonthFrom) || 1));
+    state.t6MonthTo = Math.max(state.t6MonthFrom, Math.min(12, Number(saved.t6MonthTo) || 12));
+    state.t6Region = String(saved.t6Region || "");
+    setT6Years(state.t6Years);
+    $("#ready-month-from").value = String(state.t6MonthFrom);
+    $("#ready-month-to").value = String(state.t6MonthTo);
+    $("#ready-region").value = state.t6Region;
     state.qualityProfiles = (saved.qualityProfiles || []).filter(function (id) { return SQL_SCHEMA.systemFilters.some(function (item) { return item.id === id; }); });
     state.latestPersonOnly = saved.latestPersonOnly === true;
     state.parallel8 = saved.parallel8 === true;
     state.salaryGrain = saved.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
+    $("#ready-grain").value = state.salaryGrain;
     state.salaryPopulationRule = saved.salaryPopulationRule === "positive_salary" ? "positive_salary" : "reported";
     state.mode = SQL_SCHEMA.outputModes.some(function (mode) { return mode.id === saved.mode; }) ? saved.mode : "select";
     state.targetTable = String(saved.targetTable || "work_result");
@@ -1348,6 +1374,36 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       $("#all-history-confirm-wrap").hidden = state.semanticMode !== "all_history";
       updateSql();
     });
+    $("#ready-years").addEventListener("change", (event) => {
+      const years = readT6Years();
+      if (!years.length) {
+        event.target.checked = true;
+        notify("Оберіть хоча б один рік T6", false);
+        return;
+      }
+      state.t6Years = years;
+      updateSql();
+    });
+    const syncT6Parameters = (event) => {
+      let monthFrom = Math.max(1, Math.min(12, Number($("#ready-month-from").value) || 1));
+      let monthTo = Math.max(1, Math.min(12, Number($("#ready-month-to").value) || 12));
+      if (monthFrom > monthTo) {
+        if (event && event.target.id === "ready-month-to") monthFrom = monthTo;
+        else monthTo = monthFrom;
+      }
+      state.t6MonthFrom = monthFrom; state.t6MonthTo = monthTo; state.t6Region = $("#ready-region").value.trim();
+      $("#ready-month-from").value = String(monthFrom); $("#ready-month-to").value = String(monthTo);
+      updateSql();
+    };
+    $("#ready-month-from").addEventListener("change", syncT6Parameters);
+    $("#ready-month-to").addEventListener("change", syncT6Parameters);
+    $("#ready-region").addEventListener("input", syncT6Parameters);
+    $("#ready-grain").addEventListener("change", (event) => {
+      state.salaryGrain = event.target.value;
+      $$('[name="salary-grain"]').forEach((radio) => { radio.checked = radio.value === state.salaryGrain; });
+      renderSalarySettings();
+      updateSql();
+    });
     $("#all-history-confirmed").addEventListener("change", (event) => { state.allHistoryConfirmed = event.target.checked; updateSql(); });
     $("#quality-accepted-packages").addEventListener("change", (event) => {
       state.qualityProfiles = event.target.checked ? ["accepted_actual_packages"] : [];
@@ -1363,6 +1419,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
     $$('[name="salary-grain"]').forEach((radio) => radio.addEventListener("change", (event) => {
       state.salaryGrain = event.target.value;
+      $("#ready-grain").value = state.salaryGrain;
       renderSalarySettings();
       updateSql();
     }));

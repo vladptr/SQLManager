@@ -7,6 +7,23 @@ window.SqlBuilder = (function () {
   function col(alias, name) { return `${alias}.${name}`; }
   function escapeLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
   function unique(values) { return [...new Set(values)]; }
+  function buildT6Source(state) {
+    const years = unique((Array.isArray(state.t6Years) && state.t6Years.length ? state.t6Years : [2026]).map(Number)).sort();
+    const invalid = years.filter((year) => !Number.isInteger(year) || year < 2021 || year > 2026);
+    if (invalid.length || !years.length) return { errors: ["Роки T6 мають бути в діапазоні 2021–2026."], sourceName: "", cte: "" };
+    const monthFrom = Math.max(1, Math.min(12, Number(state.t6MonthFrom) || 1));
+    const monthTo = Math.max(monthFrom, Math.min(12, Number(state.t6MonthTo) || 12));
+    const region = String(state.t6Region || "").trim();
+    const predicates = [];
+    if (monthFrom !== 1 || monthTo !== 12) predicates.push(`aped46_mnth BETWEEN ${monthFrom} AND ${monthTo}`);
+    if (region) predicates.push(`reg = ${escapeLiteral(region)}`);
+    const where = predicates.length ? `\n  WHERE ${predicates.join("\n    AND ")}` : "";
+    const physicalName = (year) => `vasiliuk_u.t6_${year}_edrpou`;
+    if (years.length === 1 && !where) return { errors: [], sourceName: physicalName(years[0]), cte: "", years };
+    const columns = (table("t6_2026_edrpou").columns || []).filter((item) => !item.derived).map((item) => item.name).join(", ");
+    const branches = years.map((year) => `SELECT ${columns}\n  FROM ${physicalName(year)}${where}`);
+    return { errors: [], sourceName: "t6_selected_years", cte: `t6_selected_years AS (\n  ${branches.join("\n  UNION ALL\n  ")}\n)`, years };
+  }
   function reverseCardinality(value) {
     return ({ "1:N": "N:1", "N:1": "1:N", "1:0..N": "0..N:1", "0..N:1": "1:0..N", "N:0..1": "0..1:N", "0..1:N": "N:0..1", "N:M": "M:N", "M:N": "N:M", "1:1": "1:1" })[value] || value;
   }
@@ -16,11 +33,25 @@ window.SqlBuilder = (function () {
   function replaceAliases(expression, aliases) {
     return expression.replace(/\{([^}]+)\}/g, (_, id) => aliases[id] || `{${id}}`);
   }
+  function t6AgeExpression(alias) {
+    return `TRUNC(MONTHS_BETWEEN(TO_DATE('31.12.' || ${alias}.year, 'DD.MM.YYYY'), ${alias}.birth_dt) / 12)`;
+  }
+  function t6AgeGroupExpression(alias) {
+    const age = t6AgeExpression(alias);
+    const clauses = (SQL_SCHEMA.ageGroups || []).map((group) => {
+      if (group.max == null) return `WHEN ${age} >= ${group.min} THEN ${escapeLiteral(group.label)}`;
+      if (group.min == null) return `WHEN ${age} < ${group.max + 1} THEN ${escapeLiteral(group.label)}`;
+      return `WHEN ${age} BETWEEN ${group.min} AND ${group.max} THEN ${escapeLiteral(group.label)}`;
+    });
+    return `CASE WHEN ${alias}.birth_dt IS NULL THEN NULL ${clauses.join(" ")} END`;
+  }
   function columnExpression(tableId, name, aliases) {
     const info = column(tableId, name);
     if (info && info.semanticExpression && (info.requires || []).every((id) => aliases[id])) {
       return replaceAliases(info.semanticExpression, aliases);
     }
+    if (tableId === "t6_2026_edrpou" && name === "age") return t6AgeExpression(aliases[tableId]);
+    if (tableId === "t6_2026_edrpou" && name === "age_group") return t6AgeGroupExpression(aliases[tableId]);
     return col(aliases[tableId], name);
   }
 
@@ -274,11 +305,11 @@ window.SqlBuilder = (function () {
     return result;
   }
 
-  function fieldExpression(item, aliases, withAlias, ctas) {
-    const base = columnExpression(item.table, item.column, aliases);
+  function fieldExpression(item, aliases, withAlias, ctas, materializedDerived) {
+    const info = column(item.table, item.column);
+    const base = materializedDerived && info && info.derived ? col(aliases[item.table], item.column) : columnExpression(item.table, item.column, aliases);
     let expression = item.agg === "COUNT_DISTINCT" ? `COUNT(DISTINCT ${base})` : item.agg ? `${item.agg}(${base})` : base;
     if (!withAlias) return expression;
-    const info = column(item.table, item.column);
     const alias = item.outAlias || item.alias || (ctas ? item.column : (info && info.label) || item.column);
     return `${expression} AS "${String(alias).replace(/"/g, '""')}"`;
   }
@@ -304,26 +335,33 @@ window.SqlBuilder = (function () {
     const selectedSalaryMetrics = (SQL_SCHEMA.metrics || []).filter((metric) => metric.salaryMetric && (state.metrics || []).includes(metric.id));
     const salaryMetric = selectedSalaryMetrics[0];
     if (!salaryMetric) return null;
+    const isAnnualIncome = salaryMetric.id === "avg_annual_income_per_person";
+    let annualDimensions = [];
     const companionMetricIds = ["payroll", "contributions", "people_count", "insurers_count", "rows_count"];
     const companionMetrics = (state.metrics || []).filter((id) => companionMetricIds.includes(id)).map((id) => (SQL_SCHEMA.metrics || []).find((metric) => metric.id === id)).filter(Boolean);
     const unsupportedMetricIds = (state.metrics || []).filter((id) => !selectedSalaryMetrics.some((metric) => metric.id === id) && !companionMetricIds.includes(id));
     const errors = [...plan.errors];
     const warnings = [...plan.warnings];
     const diagnostics = [...(plan.diagnostics || [])];
+    const t6Source = buildT6Source(state);
+    errors.push(...t6Source.errors);
     if (selectedSalaryMetrics.length > 1) errors.push("Одночасно можна вибрати лише один вид середньої зарплати.");
     if (unsupportedMetricIds.length) errors.push("З вибраним зарплатним показником ці показники поки несумісні: " + unsupportedMetricIds.join(", ") + ".");
     if (["ctas", "drop_ctas"].includes(state.mode) && !IDENTIFIER.test(String(state.targetTable || "").trim())) {
       errors.push("Назва CTAS-таблиці має бути коректним Oracle identifier: TABLE або SCHEMA.TABLE.");
     }
     if (!selected.includes("t6_2026_edrpou")) errors.push("Зарплатний показник потребує джерело T6_2026_EDRPOU.");
-    if (salaryMetric.id === "avg_annual_income_per_person") {
-      if (companionMetrics.length) errors.push("Фактичний середній річний дохід особи не можна поєднувати з іншими показниками в одному запиті: вони мають інше зерно.");
+    if (isAnnualIncome) {
+      const incompatibleCompanions = companionMetrics.filter((metric) => !["people_count", "rows_count"].includes(metric.id));
+      if (incompatibleCompanions.length) errors.push("Фактичний середній річний дохід особи несумісний із показниками іншого зерна: " + incompatibleCompanions.map((metric) => metric.label).join(", ") + ".");
       if (selected.some((id) => id !== "t6_2026_edrpou")) errors.push("Фактичний середній річний дохід особи поки не підтримує розрізи за КВЕД або іншими довідниками.");
-      const personYearColumns = ["year", "kod_zo"];
-      const invalidDimensions = (state.fields || []).filter((field) => !field.agg && (field.table !== "t6_2026_edrpou" || !personYearColumns.includes(field.column)));
-      if (invalidDimensions.length) errors.push("Фактичний середній річний дохід особи має зерно особа–рік. Дозволені розрізи лише year і kod_zo.");
-      const invalidDirectOrder = (state.orderBy || []).filter((order) => order.fieldIndex == null && (order.table !== "t6_2026_edrpou" || !personYearColumns.includes(order.column)));
-      if (invalidDirectOrder.length) errors.push("Сортування фактичного середнього річного доходу дозволене лише за колонками person_year: year і kod_zo.");
+      const policy = salaryMetric.dimensionPolicy || {};
+      const compatibleDimensions = policy.compatible || [];
+      annualDimensions = unique((state.fields || []).filter((field) => !field.agg && field.table === "t6_2026_edrpou" && compatibleDimensions.includes(field.column)).map((field) => field.column));
+      const invalidDimensions = (state.fields || []).filter((field) => !field.agg && (field.table !== "t6_2026_edrpou" || !compatibleDimensions.includes(field.column)));
+      if (invalidDimensions.length) errors.push("Вибраний розріз не має однозначного значення на рівні особа–рік. Регіон, роботодавець і КВЕД потребують окремої семантичної політики.");
+      const invalidDirectOrder = (state.orderBy || []).filter((order) => order.fieldIndex == null && (order.table !== "t6_2026_edrpou" || !compatibleDimensions.includes(order.column)));
+      if (invalidDirectOrder.length) errors.push("Сортування річного доходу дозволене лише за сумісними колонками рівня особа–рік.");
     }
     const grain = state.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
     if (companionMetrics.some((metric) => metric.id === "insurers_count") && grain !== "person_employer_month") {
@@ -346,8 +384,9 @@ window.SqlBuilder = (function () {
       }
     }
     const safeRawDimensions = ["reg"];
-    const rawDimensionColumns = unique((state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && safeRawDimensions.includes(field.column) && !field.agg).map((field) => field.column));
-    const unsupportedFields = (state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && !["year", "aped46_mnth", "kod_zo", "slb_im", "edrpou"].concat(safeRawDimensions).includes(field.column));
+    const annualRawDimensions = unique((annualDimensions.includes("sex") ? ["sex"] : []).concat(annualDimensions.some((columnName) => ["birth_dt", "age", "age_group"].includes(columnName)) ? ["birth_dt"] : []));
+    const rawDimensionColumns = isAnnualIncome ? annualRawDimensions : unique((state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && safeRawDimensions.includes(field.column) && !field.agg).map((field) => field.column));
+    const unsupportedFields = isAnnualIncome ? [] : (state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && !["year", "aped46_mnth", "kod_zo", "slb_im", "edrpou"].concat(safeRawDimensions).includes(field.column));
     if (unsupportedFields.length) errors.push("Для зарплатної метрики поля сум і категорій не можна виводити до приведення до місячного зерна.");
     if (diagnostics.some((item) => item.severity === "error")) diagnostics.filter((item) => item.severity === "error").forEach((item) => errors.push(item.message));
     if (errors.length) return { sql: "", errors: unique(errors), warnings: unique(warnings), diagnostics, aliases: plan.aliases, graph: plan };
@@ -360,15 +399,33 @@ window.SqlBuilder = (function () {
     const rawDimensionSelect = rawDimensionColumns.length ? ", " + rawDimensionColumns.map((columnName) => `t6_src.${columnName}`).join(", ") : "";
     const rawDimensionNames = rawDimensionColumns.length ? ", " + rawDimensionColumns.join(", ") : "";
     const rawDimensionGroup = rawDimensionColumns.length ? ", " + rawDimensionColumns.map((columnName) => `t6_src.${columnName}`).join(", ") : "";
-    const ctes = [
+    const joinCtes = (plan.ctes || []).map((cte) => cte.replace(/vasiliuk_u\.t6_2026_edrpou/g, t6Source.sourceName));
+    const ctes = (t6Source.cte ? [t6Source.cte] : []).concat(joinCtes, [
       `person_employer_month AS (\n  SELECT t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou${rawDimensionSelect},\n         SUM(NVL(t6_src.sum_narah, 0)) AS salary_month,\n         SUM(NVL(t6_src.sum_vrah, 0)) AS salary_counted_month,\n         SUM(NVL(t6_src.sum_narah_vnes, 0)) AS esv_month\n  FROM vasiliuk_u.t6_2026_edrpou t6_src${rawWhere.length ? `\n  WHERE ${rawWhere.join("\n    AND ")}` : ""}\n  GROUP BY t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou${rawDimensionGroup}\n)`,
       `person_month AS (\n  SELECT year, aped46_mnth, kod_zo${rawDimensionNames},\n         SUM(salary_month) AS salary_month,\n         SUM(salary_counted_month) AS salary_counted_month,\n         SUM(esv_month) AS esv_month\n  FROM person_employer_month\n  GROUP BY year, aped46_mnth, kod_zo${rawDimensionNames}\n)`,
       `salary_population AS (\n  SELECT *\n  FROM ${grain}${populationWhere}\n)`
-    ];
+    ]);
+    ctes[ctes.length - 3] = ctes[ctes.length - 3].replace("vasiliuk_u.t6_2026_edrpou", t6Source.sourceName);
     let sourceName = "salary_population";
-    if (salaryMetric.id === "avg_annual_income_per_person") {
-      ctes.push("person_year AS (\n  SELECT year, kod_zo, SUM(salary_month) AS salary_year\n  FROM salary_population\n  GROUP BY year, kod_zo\n)");
+    if (isAnnualIncome) {
+      const annualBaseDimensions = annualRawDimensions.length ? ", " + annualRawDimensions.join(", ") : "";
+      ctes.push(`person_year AS (\n  SELECT year, kod_zo${annualBaseDimensions}, SUM(salary_month) AS salary_year\n  FROM salary_population\n  GROUP BY year, kod_zo${annualBaseDimensions}\n)`);
       sourceName = "person_year";
+      if (annualDimensions.includes("age") || annualDimensions.includes("age_group")) {
+        const ageExpression = "TRUNC(MONTHS_BETWEEN(TO_DATE('31.12.' || year, 'DD.MM.YYYY'), birth_dt) / 12)";
+        ctes.push(`person_year_age AS (\n  SELECT person_year.*, ${ageExpression} AS age\n  FROM person_year\n)`);
+        sourceName = "person_year_age";
+      }
+      if (annualDimensions.includes("age_group")) {
+        const ageGroupLines = (SQL_SCHEMA.ageGroups || []).map((group) => {
+          if (group.max == null) return `WHEN age >= ${group.min} THEN ${escapeLiteral(group.label)}`;
+          if (group.min == null) return `WHEN age < ${group.max + 1} THEN ${escapeLiteral(group.label)}`;
+          return `WHEN age BETWEEN ${group.min} AND ${group.max} THEN ${escapeLiteral(group.label)}`;
+        });
+        const ageGroupCase = `CASE\n         WHEN age IS NULL THEN NULL\n         ${ageGroupLines.join("\n         ")}\n       END`;
+        ctes.push(`person_year_dim AS (\n  SELECT person_year_age.*, ${ageGroupCase} AS age_group\n  FROM person_year_age\n)`);
+        sourceName = "person_year_dim";
+      }
     }
     const rootAlias = plan.aliases.t6_2026_edrpou;
     let from = `FROM ${sourceName} ${rootAlias}`;
@@ -382,7 +439,7 @@ window.SqlBuilder = (function () {
     if (salaryMetric.id === "median_monthly_salary_period") formula = "MEDIAN(t6.salary_month)";
     if (salaryMetric.id === "avg_monthly_salary_year" || salaryMetric.id === "avg_annual_salary" || salaryMetric.id === "avg_annual_income_per_person") mandatory = ["year"];
     if (salaryMetric.id === "avg_annual_salary") formula = "12 * SUM(t6.salary_month) / NULLIF(COUNT(*), 0)";
-    if (salaryMetric.id === "avg_annual_income_per_person") formula = "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)";
+    if (isAnnualIncome) formula = "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)";
     formula = formula.replace(/\bt6\./g, rootAlias + ".");
     const dimensionItems = [];
     const groupBy = [];
@@ -392,9 +449,9 @@ window.SqlBuilder = (function () {
     });
     (state.fields || []).forEach((field) => {
       if (field.agg) return;
-      const expression = fieldExpression(field, plan.aliases, false, false);
+      const expression = fieldExpression(field, plan.aliases, false, false, isAnnualIncome);
       if (!groupBy.includes(expression)) {
-        dimensionItems.push(fieldExpression(field, plan.aliases, true, false));
+        dimensionItems.push(fieldExpression(field, plan.aliases, true, false, isAnnualIncome));
         groupBy.push(expression);
       }
     });
@@ -405,14 +462,18 @@ window.SqlBuilder = (function () {
       insurers_count: `COUNT(DISTINCT ${rootAlias}.edrpou)`,
       rows_count: "COUNT(*)"
     };
+    if (isAnnualIncome) {
+      companionFormulas.people_count = "COUNT(*)";
+      companionFormulas.rows_count = "COUNT(*)";
+    }
     const companionItems = companionMetrics.map((metric) => `${companionFormulas[metric.id]} AS "${metric.alias}"`);
     const selectItems = dimensionItems.concat(companionItems, [`${formula} AS "${salaryMetric.alias}"`]);
     let sql = `WITH\n  ${ctes.map((cte) => cte.replace(/\n/g, "\n  ")).join(",\n  ")}\nSELECT${state.parallel8 ? " /*+ PARALLEL(8) */" : ""}\n       ${selectItems.join(",\n       ")}\n${from}`;
     if (outerWhere.length) sql += `\n WHERE ${outerWhere.join("\n   AND ")}`;
     if (groupBy.length) sql += `\n GROUP BY\n       ${groupBy.join(",\n       ")}`;
     const order = (state.orderBy || []).map((item) => {
-      if (item.fieldIndex != null && state.fields[item.fieldIndex]) return `${fieldExpression(state.fields[item.fieldIndex], plan.aliases, false, false)} ${item.dir || "ASC"}`;
-      if (item.table && item.column && plan.aliases[item.table]) return `${col(plan.aliases[item.table], item.column)} ${item.dir || "ASC"}`;
+      if (item.fieldIndex != null && state.fields[item.fieldIndex]) return `${fieldExpression(state.fields[item.fieldIndex], plan.aliases, false, false, isAnnualIncome)} ${item.dir || "ASC"}`;
+      if (item.table && item.column && plan.aliases[item.table]) return `${isAnnualIncome && column(item.table, item.column) && column(item.table, item.column).derived ? col(plan.aliases[item.table], item.column) : columnExpression(item.table, item.column, plan.aliases)} ${item.dir || "ASC"}`;
       return null;
     }).filter(Boolean);
     if (order.length) sql += `\n ORDER BY ${order.join(", ")}`;
@@ -432,12 +493,19 @@ window.SqlBuilder = (function () {
     const errors = [...plan.errors];
     const warnings = [...plan.warnings];
     const diagnostics = [...(plan.diagnostics || [])];
+    const t6Source = selected.includes("t6_2026_edrpou") ? buildT6Source(state) : { errors: [], sourceName: "", cte: "" };
+    errors.push(...t6Source.errors);
     const semanticMode = state.semanticMode || ((state.presets || []).includes("current_insurer_profile") ? "current" : null);
     if (semanticMode && !["current", "all_history"].includes(semanticMode)) errors.push("Непідтримуваний semantic mode. Доступні лише current та all_history.");
     if (semanticMode === "all_history" && state.allHistoryConfirmed !== true) errors.push("Режим «Усі історичні версії» потребує явного підтвердження ризику розмноження рядків.");
     if (errors.length) return { sql: "", errors, warnings, aliases, graph: plan };
     const salaryResult = buildSalaryMetric(state, selected, plan);
     if (salaryResult) return salaryResult;
+    if (t6Source.sourceName && t6Source.sourceName !== "vasiliuk_u.t6_2026_edrpou") {
+      plan.joins.forEach((join) => { if (join.table === "t6_2026_edrpou") join.sourceName = t6Source.sourceName; });
+      plan.ctes = (plan.ctes || []).map((cte) => cte.replace(/vasiliuk_u\.t6_2026_edrpou/g, t6Source.sourceName));
+      if (t6Source.cte) plan.ctes.unshift(t6Source.cte);
+    }
     const fields = state.fields || [];
     const metrics = (state.metrics || []).map((id) => metricExpression(id, aliases)).filter(Boolean);
     validateCtas(state, selected, fields, metrics, errors);
@@ -452,7 +520,8 @@ window.SqlBuilder = (function () {
     const selectItems = fields.map((item) => fieldExpression(item, aliases, true, ctas));
     metrics.forEach(({ metric, expression }) => selectItems.push(`${expression} AS "${metric.alias}"`));
     if (!selectItems.length) selected.forEach((id) => selectItems.push(`${aliases[id]}.*`));
-    const rootSource = sourceForRoot(plan.root, plan.joins) || table(plan.root).fullName;
+    const rootSource = plan.root === "t6_2026_edrpou" && t6Source.sourceName
+      ? t6Source.sourceName : (sourceForRoot(plan.root, plan.joins) || table(plan.root).fullName);
     let from = `FROM ${rootSource} ${aliases[plan.root]}`;
     plan.joins.forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
     const groupBy = fields.filter((item) => !item.agg).map((item) => fieldExpression(item, aliases, false, ctas));

@@ -530,6 +530,36 @@
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "kod_zo", agg: "" }] }));
     equal(r.errors.length, 0); includes(r.sql, "person_year AS"); includes(r.sql, "t6.kod_zo");
   });
+  test("annual income allows sex breakdown through person-year", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "sex", agg: "" }] }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "SELECT year, kod_zo, sex, SUM(salary_month) AS salary_year");
+    includes(r.sql, "GROUP BY year, kod_zo, sex");
+    includes(r.sql, "t6.sex AS");
+  });
+  test("annual income allows age-group breakdown through birth date", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "age_group", agg: "" }] }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_year_age AS");
+    includes(r.sql, "TO_DATE('31.12.' || year, 'DD.MM.YYYY')");
+    includes(r.sql, "WHEN age BETWEEN 20 AND 24 THEN '20-24'");
+    includes(r.sql, "WHEN age >= 65 THEN '65+'");
+    includes(r.sql, "t6.age_group AS");
+  });
+  test("annual income allows sex and age-group with person count", () => {
+    const r = result(state(["t6_2026_edrpou"], {
+      metrics: ["avg_annual_income_per_person", "people_count"],
+      fields: [
+        { table: "t6_2026_edrpou", column: "sex", agg: "" },
+        { table: "t6_2026_edrpou", column: "age_group", agg: "" }
+      ]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "GROUP BY year, kod_zo, sex, birth_dt");
+    includes(r.sql, 'COUNT(*) AS "people_count"');
+    includes(r.sql, "t6.sex AS");
+    includes(r.sql, "t6.age_group AS");
+  });
   test("salary by KVED aggregates before dictionary joins", () => {
     const r = result(state(["t6_2026_edrpou", "nsi_kved"], {
       metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month",
@@ -609,6 +639,55 @@
     const a = result(state(["t6_2026_edrpou", "nsi_kved"], extra));
     const b = result(state(["nsi_kved", "t6_2026_edrpou"], extra));
     equal(a.sql, b.sql);
+  });
+  test("salary can combine three T6 years with UNION ALL", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], t6Years: [2024, 2025, 2026] }));
+    equal(r.errors.length, 0); includes(r.sql, "t6_selected_years AS");
+    includes(r.sql, "FROM vasiliuk_u.t6_2024_edrpou"); includes(r.sql, "FROM vasiliuk_u.t6_2025_edrpou"); includes(r.sql, "FROM vasiliuk_u.t6_2026_edrpou");
+    if ((r.sql.match(/UNION ALL/g) || []).length !== 2) throw new Error("Expected two UNION ALL operators");
+    includes(r.sql, "FROM t6_selected_years t6_src");
+  });
+  test("T6 month and region parameters filter every selected year before UNION", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["payroll"], t6Years: [2024, 2026], t6MonthFrom: 5, t6MonthTo: 5, t6Region: "5" }));
+    equal(r.errors.length, 0); includes(r.sql, "t6_selected_years AS");
+    if ((r.sql.match(/aped46_mnth BETWEEN 5 AND 5/g) || []).length !== 2) throw new Error("Month predicate is not applied to every T6 year");
+    if ((r.sql.match(/reg = '5'/g) || []).length !== 2) throw new Error("Region predicate is not applied to every T6 year");
+  });
+  test("derived age group is calculated for a regular multi-year aggregate", () => {
+    const r = result(state(["t6_2026_edrpou"], {
+      metrics: ["payroll", "contributions", "people_count"],
+      fields: [
+        { table: "t6_2026_edrpou", column: "reg", agg: "" },
+        { table: "t6_2026_edrpou", column: "age_group", agg: "" },
+        { table: "t6_2026_edrpou", column: "sex", agg: "" }
+      ],
+      t6Years: [2024, 2025, 2026], t6MonthFrom: 12, t6MonthTo: 12
+    }));
+    equal(r.errors.length, 0);
+    if (/\bt6\.age_group\b/.test(r.sql)) throw new Error("Derived age_group was emitted as a physical T6 column");
+    includes(r.sql, "MONTHS_BETWEEN(TO_DATE('31.12.' || t6.year, 'DD.MM.YYYY'), t6.birth_dt)");
+    includes(r.sql, "WHEN TRUNC(");
+    includes(r.sql, "THEN '65+'");
+  });
+  test("regular query can use one historical T6 year", () => {
+    const r = result(state(["t6_2026_edrpou"], { fields: [{ table: "t6_2026_edrpou", column: "kod_zo", agg: "" }], t6Years: [2023] }));
+    equal(r.errors.length, 0); includes(r.sql, "FROM vasiliuk_u.t6_2023_edrpou t6");
+  });
+  test("regular query combines selected T6 years before joins", () => {
+    const r = result(state(["t6_2026_edrpou", "pinsur_main"], { fields: [{ table: "t6_2026_edrpou", column: "kod_zo", agg: "" }], t6Years: [2025, 2026] }));
+    equal(r.errors.length, 0); includes(r.sql, "t6_selected_years AS"); includes(r.sql, "FROM t6_selected_years t6"); includes(r.sql, "JOIN ikis_ersp.pinsur_main im");
+  });
+  test("multi-year salary keeps technical APE position CTE", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month", semanticMode: "current", t6Years: [2025, 2026],
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "position_as_of_t6_month" }]
+    }));
+    if (r.errors.length) throw new Error(r.errors.join(" | ")); includes(r.sql, "t6_selected_years AS"); includes(r.sql, "ape45_position_as_of_t6_month AS");
+    includes(r.sql, "FROM t6_selected_years t6_src"); includes(r.sql, "JOIN ape45_position_as_of_t6_month d5");
+  });
+  test("T6 year outside supported history is rejected", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["payroll"], t6Years: [2020] }));
+    if (!r.errors.length || r.sql) throw new Error("Unsupported T6 year accepted");
   });
   test("salary CTAS validates Oracle identifier", () => {
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_salary_month"], mode: "ctas", targetTable: "bad table" }));

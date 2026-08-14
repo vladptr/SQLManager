@@ -40,11 +40,21 @@
               <h3 class="block-title">Готові звіти</h3>
               <p class="hint">Оберіть задачу — вона заповнить той самий перевірений конструктор. Параметри можна змінити на наступних кроках.</p>
               <div class="template-settings-row ready-report-params">
-                <label>Рік <input id="ready-year" type="number" min="2000" max="2100" value="2026" /></label>
-                <label>Місяць від <input id="ready-month-from" type="number" min="1" max="12" value="1" /></label>
-                <label>Місяць до <input id="ready-month-to" type="number" min="1" max="12" value="12" /></label>
+                <div class="t6-years-field">
+                  <span>Роки T6</span>
+                  <div id="ready-years" class="t6-year-options" role="group" aria-label="Роки таблиць T6">
+                    <label><input type="checkbox" value="2021" /> 2021</label>
+                    <label><input type="checkbox" value="2022" /> 2022</label>
+                    <label><input type="checkbox" value="2023" /> 2023</label>
+                    <label><input type="checkbox" value="2024" /> 2024</label>
+                    <label><input type="checkbox" value="2025" /> 2025</label>
+                    <label><input type="checkbox" value="2026" checked /> 2026</label>
+                  </div>
+                </div>
+                <label>Місяць від <select id="ready-month-from"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></label>
+                <label>Місяць до <select id="ready-month-to"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option selected>12</option></select></label>
                 <label>Регіон <input id="ready-region" type="text" placeholder="необов’язково" /></label>
-                <label>Зерно <select id="ready-grain"><option value="person_month">особа–місяць</option><option value="person_employer_month" selected>особа–роботодавець–місяць</option></select></label>
+                <label>Зерно <select id="ready-grain"><option value="person_month" selected>особа–місяць</option><option value="person_employer_month">особа–роботодавець–місяць</option></select></label>
                 <label>Популяція <select id="ready-population"><option value="reported">є запис T6</option><option value="positive_salary">зарплата &gt; 0</option></select></label>
                 <label>Режим <select id="ready-semantic-mode"><option value="current">актуальний</option><option value="all_history">усі історичні версії</option></select></label>
               </div>

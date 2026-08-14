@@ -9,7 +9,7 @@
     "tables", "joins", "fields", "filters", "orderBy", "metrics", "presets",
     "latestPersonOnly", "parallel8", "salaryGrain", "salaryPopulationRule",
     "mode", "targetTable", "semanticMode", "allHistoryConfirmed",
-    "qualityProfiles", "taskId", "taskParameters"
+    "qualityProfiles", "taskId", "taskParameters", "t6Years", "t6MonthFrom", "t6MonthTo", "t6Region"
   ];
 
   function clone(value) { return JSON.parse(JSON.stringify(value)); }

@@ -11,10 +11,10 @@ window.SQL_SCHEMA = {
     {
       id: "t6_2026_edrpou",
       fullName: "vasiliuk_u.t6_2026_edrpou",
-      label: "Зведення нарахувань (T6 2026)",
+      label: "Зведення нарахувань T6 (2021–2026)",
       defaultAlias: "t6",
       description:
-        "Підготовлені рядки: організація, особа, суми, місяць/рік, категорія. База для різних вибірок по зведенню.",
+        "Підготовлені рядки за вибрані роки 2021–2026. Кілька річних таблиць об’єднуються через UNION ALL до JOIN та агрегації.",
       group: "work",
       grain: "один рядок на особу, страхувальника та місяць у підготовленому зведенні",
       columns: [
@@ -31,6 +31,8 @@ window.SQL_SCHEMA = {
         { name: "year", label: "Рік", type: "NUMBER" },
         { name: "kat_zo", label: "Категорія особи", type: "NUMBER" },
         { name: "sex", label: "Стать (код)", type: "NUMBER" },
+        { name: "age", label: "Вік на 31 грудня звітного року", type: "NUMBER", derived: true },
+        { name: "age_group", label: "Вікова група", type: "VARCHAR2", derived: true },
       ],
     },
     {
@@ -600,7 +602,15 @@ window.SQL_SCHEMA = {
     { id: "median_monthly_salary_period", salaryMetric: true, label: "Медіанна місячна зарплата за період", tables: ["t6_2026_edrpou"], alias: "median_monthly_salary_period", numerator: "медіана місячної зарплати після приведення до вибраного зерна", denominator: "не застосовується", unit: "грн на місяць", period: "вибраний період" },
     { id: "avg_monthly_salary_year", salaryMetric: true, label: "Середньомісячна зарплата за рік", tables: ["t6_2026_edrpou"], alias: "avg_monthly_salary_year", numerator: "річний фонд зарплати", denominator: "кількість активних людино-місяців року", unit: "грн на місяць", period: "календарний рік" },
     { id: "avg_annual_salary", salaryMetric: true, label: "Річний еквівалент середньомісячної зарплати", tables: ["t6_2026_edrpou"], alias: "avg_annual_salary", numerator: "12 × річний фонд зарплати", denominator: "сума місячної чисельності", unit: "грн на рік", period: "повний календарний рік" },
-    { id: "avg_annual_income_per_person", salaryMetric: true, label: "Середній фактичний річний дохід особи", tables: ["t6_2026_edrpou"], alias: "avg_annual_income_per_person", numerator: "сума річних доходів осіб", denominator: "кількість унікальних осіб року", unit: "грн на рік", period: "рік" },
+    { id: "avg_annual_income_per_person", salaryMetric: true, grain: "person_year", label: "Середній фактичний річний дохід особи", tables: ["t6_2026_edrpou"], alias: "avg_annual_income_per_person", numerator: "сума річних доходів осіб", denominator: "кількість унікальних осіб року", unit: "грн на рік", period: "рік", dimensionPolicy: { compatible: ["year", "kod_zo", "sex", "birth_dt", "age", "age_group"], incompatible: ["aped46_mnth"], requiresSemanticPolicy: ["reg", "edrpou", "slb_im"] } },
+  ],
+  ageGroups: [
+    { max: 19, label: "до 20" },
+    { min: 20, max: 24, label: "20-24" }, { min: 25, max: 29, label: "25-29" },
+    { min: 30, max: 34, label: "30-34" }, { min: 35, max: 39, label: "35-39" },
+    { min: 40, max: 44, label: "40-44" }, { min: 45, max: 49, label: "45-49" },
+    { min: 50, max: 54, label: "50-54" }, { min: 55, max: 59, label: "55-59" },
+    { min: 60, max: 64, label: "60-64" }, { min: 65, label: "65+" },
   ],
   systemFilters: [
     { id: "accepted_actual_packages", label: "Лише прийняті й актуальні пакети", description: "Відбирає зафіксовані актуальні прийняті пакети та прийняті рядки T6.", tables: ["sm_packlabel", "sm_ape4_6data"], expressions: ["{sm_packlabel}.slb_fixed = 'Y'", "{sm_packlabel}.slb_actuality = 'Y'", "{sm_packlabel}.slb_st = 'O'", "{sm_ape4_6data}.aped46_st = 'O'"] },

@@ -575,6 +575,29 @@ textarea:focus {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+.t6-years-field {
+  display: grid;
+  gap: 6px;
+  min-width: min(100%, 310px);
+}
+.t6-years-field > span { color: var(--muted); font-size: 0.9rem; }
+.t6-year-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.t6-year-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg0);
+  cursor: pointer;
+}
+.t6-year-options input { width: auto; margin: 0; accent-color: var(--accent); }
 #sql-explain ul {
   margin: 0;
   padding-left: 18px;
