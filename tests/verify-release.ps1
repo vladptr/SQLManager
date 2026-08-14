@@ -15,8 +15,21 @@ $usedIds = [regex]::Matches($app, '\$\(["'']#([A-Za-z0-9_-]+)["'']\)') |
   ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
 $missingIds = $usedIds | Where-Object { $index -notmatch ('id="' + [regex]::Escape($_) + '"') }
 if ($missingIds) { throw "Missing DOM IDs: $($missingIds -join ', ')" }
-$required = @("index.html", "README.md", "build-portable.ps1", "start.bat") +
+$required = @("index.html", "README.md", "SQLManager-portable.html", "build-portable.ps1", "start.bat") +
   (4..7 | ForEach-Object { "rzo_schema_$_.sql" })
 $missingFiles = $required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_)) }
 if ($missingFiles) { throw "Missing release files: $($missingFiles -join ', ')" }
+$expectedPortable = $index
+$css = [IO.File]::ReadAllText((Join-Path $root "css\styles.css"), [Text.Encoding]::UTF8)
+$expectedPortable = $expectedPortable.Replace('<link rel="stylesheet" href="css/styles.css" />', "<style>`n$css`n</style>")
+foreach ($relativePath in $expectedScripts) {
+  $source = [IO.File]::ReadAllText((Join-Path $root $relativePath.Replace("/", "\")), [Text.Encoding]::UTF8)
+  $expectedPortable = $expectedPortable.Replace("<script src=`"$relativePath`"></script>", "<script>`n$source`n</script>")
+}
+$portablePath = Join-Path $root "SQLManager-portable.html"
+$portable = [IO.File]::ReadAllText($portablePath, [Text.Encoding]::UTF8)
+if ($portable -ne $expectedPortable) { throw "SQLManager-portable.html is stale; run build-portable.ps1." }
+if ($portable -match '<script\s+src=' -or $portable -match '<link\s+rel="stylesheet"') {
+  throw "Portable HTML still contains external runtime resources."
+}
 Write-Host "Release structure OK: $($actualScripts.Count) scripts, $($usedIds.Count) DOM IDs, $($required.Count) required files."

@@ -506,6 +506,30 @@
     const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "slb_im", agg: "" }] }));
     if (!r.errors.length || r.sql) throw new Error("Annual income by employer was not blocked");
   });
+  test("annual income rejects region breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by region was not blocked");
+  });
+  test("annual income rejects month breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by month was not blocked");
+  });
+  test("annual income rejects EDRPOU breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "edrpou", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by EDRPOU was not blocked");
+  });
+  test("annual income rejects direct region ordering", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], orderBy: [{ table: "t6_2026_edrpou", column: "reg", dir: "ASC" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income ORDER BY region was not blocked");
+  });
+  test("annual income rejects direct month ordering", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], orderBy: [{ table: "t6_2026_edrpou", column: "aped46_mnth", dir: "ASC" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income ORDER BY month was not blocked");
+  });
+  test("annual income allows person identifier breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "kod_zo", agg: "" }] }));
+    equal(r.errors.length, 0); includes(r.sql, "person_year AS"); includes(r.sql, "t6.kod_zo");
+  });
   test("salary by KVED aggregates before dictionary joins", () => {
     const r = result(state(["t6_2026_edrpou", "nsi_kved"], {
       metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month",

@@ -18,8 +18,5 @@ _temp.docx
 .env
 .env.*
 *.pem
-# Local LLM runtime, downloaded models and private runtime logs
-local-llm/runtime/
-local-llm/models/
-local-llm/logs/
-local-llm/reports/raw/
+# Local LLM experiment is outside SQLManager release scope
+local-llm/

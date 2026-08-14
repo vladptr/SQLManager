@@ -319,7 +319,11 @@ window.SqlBuilder = (function () {
     if (salaryMetric.id === "avg_annual_income_per_person") {
       if (companionMetrics.length) errors.push("Фактичний середній річний дохід особи не можна поєднувати з іншими показниками в одному запиті: вони мають інше зерно.");
       if (selected.some((id) => id !== "t6_2026_edrpou")) errors.push("Фактичний середній річний дохід особи поки не підтримує розрізи за КВЕД або іншими довідниками.");
-      if ((state.fields || []).some((field) => field.table === "t6_2026_edrpou" && ["slb_im", "edrpou"].includes(field.column) && !field.agg)) errors.push("Фактичний середній річний дохід особи не можна групувати за роботодавцем: CTE person_year має зерно особа–рік.");
+      const personYearColumns = ["year", "kod_zo"];
+      const invalidDimensions = (state.fields || []).filter((field) => !field.agg && (field.table !== "t6_2026_edrpou" || !personYearColumns.includes(field.column)));
+      if (invalidDimensions.length) errors.push("Фактичний середній річний дохід особи має зерно особа–рік. Дозволені розрізи лише year і kod_zo.");
+      const invalidDirectOrder = (state.orderBy || []).filter((order) => order.fieldIndex == null && (order.table !== "t6_2026_edrpou" || !personYearColumns.includes(order.column)));
+      if (invalidDirectOrder.length) errors.push("Сортування фактичного середнього річного доходу дозволене лише за колонками person_year: year і kod_zo.");
     }
     const grain = state.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
     if (companionMetrics.some((metric) => metric.id === "insurers_count") && grain !== "person_employer_month") {
