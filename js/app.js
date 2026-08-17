@@ -31,11 +31,11 @@
   let catalogRenderCount = 0;
   const MAX_STEP = 6;
   const READY_REPORTS = [
-    { id: "salary_kved_region", label: "Середньомісячна зарплата за регіоном і актуальним КВЕД — потребує бізнес-правила", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["avg_monthly_salary_period"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
-    { id: "people_kved_month", label: "Кількість застрахованих осіб за місяцями та КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["people_count"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
+    { id: "salary_kved_region", label: "Середня зарплата за регіоном і КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["avg_monthly_salary_period"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
+    { id: "people_kved_month", label: "Кількість осіб за місяцями та КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["people_count"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
     { id: "payroll_esv", label: "Фонд зарплати й внески ЄСВ", tables: ["t6_2026_edrpou"], metrics: ["payroll", "contributions"], fields: [], grain: "person_month" },
     { id: "current_insurer", label: "Поточний профіль страхувальника", tables: ["pinsur_main", "pinsur_ankt_a"], metrics: [], fields: [], grain: "person_employer_month" },
-    { id: "position_as_of_month", label: "Посада особи станом на місяць T6", tables: ["t6_2026_edrpou", "sm_ape4_5data"], metrics: [], fields: [], grain: "person_employer_month", route: "position_as_of_t6_month" }
+    { id: "position_as_of_month", label: "Посада особи на місяць звіту", tables: ["t6_2026_edrpou", "sm_ape4_5data"], metrics: [], fields: [], grain: "person_employer_month", route: "position_as_of_t6_month" }
   ];
   const TEMPLATE_SCRIPTS = [
     {
@@ -169,6 +169,29 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     const t = SQL_SCHEMA.getTable(tableId);
     const item = t && t.columns.find((x) => x.name === col);
     return (item && item.label) || col;
+  }
+  function optionLabel(item) {
+    const code = item.code != null ? String(item.code) : "";
+    const label = String(item.label || code);
+    return code && label.indexOf("(" + code + ")") < 0 ? `${label} (${code})` : label;
+  }
+  function groupedOptionsHtml(groups, selected, emptyLabel) {
+    let html = emptyLabel != null ? `<option value="">${safeText(emptyLabel)}</option>` : "";
+    (groups || []).forEach((group) => {
+      const items = (group.items || [])
+        .map((item) => {
+          const value = item.code != null ? item.code : item.value;
+          return `<option value="${safeText(value)}" ${String(value) === String(selected || "") ? "selected" : ""}>${safeText(optionLabel(item))}</option>`;
+        })
+        .join("");
+      html += `<optgroup label="${safeText(group.label)}">${items}</optgroup>`;
+    });
+    return html;
+  }
+  function fillReadyRegionSelect(selected) {
+    const select = $("#ready-region");
+    if (!select) return;
+    select.innerHTML = groupedOptionsHtml(SQL_SCHEMA.regionGroups || [], selected, "усі регіони");
   }
   function notify(msg, ok = true) {
     const el = $("#toast");
@@ -409,11 +432,36 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   }
   function colOptions(tableId, selected) {
     const item = SQL_SCHEMA.getTable(tableId);
-    return ((item && item.columns) || [])
-      .map(
-        (c) =>
-          `<option value="${safeText(c.name)}" ${c.name === selected ? "selected" : ""}>${safeText(c.label)}</option>`
-      )
+    const columns = (item && item.columns) || [];
+    const option = (c) =>
+      `<option value="${safeText(c.name)}" ${c.name === selected ? "selected" : ""}>${safeText(c.label)}</option>`;
+    const grouped = new Map();
+    columns.forEach((c) => {
+      const group = SQL_SCHEMA.columnGroup ? SQL_SCHEMA.columnGroup(c) : { id: "other", label: "Інші поля" };
+      if (!grouped.has(group.id)) grouped.set(group.id, { label: group.label, items: [] });
+      grouped.get(group.id).items.push(c);
+    });
+    const order = SQL_SCHEMA.columnGroups || [];
+    if (grouped.size <= 1) return columns.map(option).join("");
+    return order
+      .filter((group) => grouped.has(group.id))
+      .map((group) => `<optgroup label="${safeText(group.label)}">${grouped.get(group.id).items.map(option).join("")}</optgroup>`)
+      .join("");
+  }
+  function tableOptions(selectedId) {
+    const grouped = new Map();
+    state.tables.forEach((id) => {
+      const table = SQL_SCHEMA.getTable(id);
+      const ui = table && window.SQL_CATALOG_UI && SQL_CATALOG_UI.get(table);
+      const label = (ui && SQL_CATALOG_UI.categoryLabels && SQL_CATALOG_UI.categoryLabels[ui.category]) || "Інші джерела";
+      if (!grouped.has(label)) grouped.set(label, []);
+      grouped.get(label).push(id);
+    });
+    const option = (id) =>
+      `<option value="${safeText(id)}" ${id === selectedId ? "selected" : ""}>${safeText(tLabel(id))}</option>`;
+    if (grouped.size <= 1) return state.tables.map(option).join("");
+    return [...grouped.entries()]
+      .map(([label, ids]) => `<optgroup label="${safeText(label)}">${ids.map(option).join("")}</optgroup>`)
       .join("");
   }
   function renderModeUi() {
@@ -441,36 +489,54 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const box = document.createElement("div");
       box.className = "avail-group";
       box.innerHTML = `<div class="avail-title">${safeText(t.label)}</div>`;
-      const chips = document.createElement("div");
-      chips.className = "avail-chips";
-      t.columns.forEach((c) => {
-        const already = state.fields.some(
-          (f) => f.table === tid && f.column === c.name
-        );
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "avail-chip" + (already ? " used" : "");
-        btn.disabled = already;
-        btn.innerHTML = already
-          ? `<span>${safeText(c.label)}</span><span class="chip-tag">вже додано</span>`
-          : `<span>${safeText(c.label)}</span><span class="chip-plus">+</span>`;
-        btn.title = already ? "Уже у відповіді" : "Додати у відповідь";
-        if (!already) {
-          btn.addEventListener("click", () => {
-            state.fields.push({
-              table: tid,
-              column: c.name,
-              agg: "",
-              outAlias: "",
-            });
-            renderFields();
-            renderOrder();
-            updateSql();
-          });
-        }
-        chips.appendChild(btn);
+      const grouped = new Map();
+      (t.columns || []).forEach((c) => {
+        const group = SQL_SCHEMA.columnGroup ? SQL_SCHEMA.columnGroup(c) : { id: "other", label: "Інші поля" };
+        if (!grouped.has(group.id)) grouped.set(group.id, { label: group.label, items: [] });
+        grouped.get(group.id).items.push(c);
       });
-      box.appendChild(chips);
+      const groups = (SQL_SCHEMA.columnGroups || [{ id: "other", label: "Інші поля" }]).filter((group) => grouped.has(group.id));
+      groups.forEach((group) => {
+        const subgroup = document.createElement("div");
+        subgroup.className = "avail-subgroup";
+        if (groups.length > 1) {
+          const heading = document.createElement("div");
+          heading.className = "avail-subtitle";
+          heading.textContent = grouped.get(group.id).label;
+          subgroup.appendChild(heading);
+        }
+        const chips = document.createElement("div");
+        chips.className = "avail-chips";
+        grouped.get(group.id).items.forEach((c) => {
+          const already = state.fields.some(
+            (f) => f.table === tid && f.column === c.name
+          );
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "avail-chip" + (already ? " used" : "");
+          btn.disabled = already;
+          btn.innerHTML = already
+            ? `<span>${safeText(c.label)}</span><span class="chip-tag">вже додано</span>`
+            : `<span>${safeText(c.label)}</span><span class="chip-plus">+</span>`;
+          btn.title = already ? "Уже у відповіді" : "Додати у відповідь";
+          if (!already) {
+            btn.addEventListener("click", () => {
+              state.fields.push({
+                table: tid,
+                column: c.name,
+                agg: "",
+                outAlias: "",
+              });
+              renderFields();
+              renderOrder();
+              updateSql();
+            });
+          }
+          chips.appendChild(btn);
+        });
+        subgroup.appendChild(chips);
+        box.appendChild(subgroup);
+      });
       avail.appendChild(box);
     });
     if (countEl) countEl.textContent = String(state.fields.length);
@@ -817,12 +883,6 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   function filterRow(f, idx) {
     const row = document.createElement("div");
     row.className = "filter-row";
-    const tables = state.tables
-      .map(
-        (id) =>
-          `<option value="${safeText(id)}" ${id === f.table ? "selected" : ""}>${safeText(tLabel(id))}</option>`
-      )
-      .join("");
     const ops = SQL_SCHEMA.operators
       .map(
         (o) =>
@@ -830,21 +890,26 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       )
       .join("");
     const needVal = f.op !== "IS NULL" && f.op !== "IS NOT NULL";
+    const lookup = needVal && SQL_SCHEMA.lookupForColumn ? SQL_SCHEMA.lookupForColumn(f.table, f.column) : null;
+    const useLookup = !!(lookup && (f.op === "=" || f.op === "!="));
     const ph =
       f.op === "BETWEEN"
         ? "від, до"
-        : f.op === "IN"
+        : f.op === "IN" || f.op === "NOT IN"
           ? "a, b, c"
           : f.op === "LIKE" || f.op === "LIKE_UPPER"
             ? "фрагмент"
             : "значення";
+    const valueControl = !needVal
+      ? `<input type="text" data-k="value" disabled />`
+      : useLookup
+        ? `<select data-k="value">${groupedOptionsHtml(lookup.groups, f.value, lookup.empty)}</select>`
+        : `<input type="text" data-k="value" placeholder="${safeText(ph)}" value="${safeText(f.value || "")}" />`;
     row.innerHTML = `
-      <select data-k="table">${tables}</select>
-      <select data-k="column">${colOptions(f.table, f.column)}</select>
+      <select data-k="table" title="${safeText(tLabel(f.table))}">${tableOptions(f.table)}</select>
+      <select data-k="column" title="${safeText(cLabel(f.table, f.column))}">${colOptions(f.table, f.column)}</select>
       <select data-k="op">${ops}</select>
-      <input type="text" data-k="value" placeholder="${safeText(ph)}" value="${
-        safeText(f.value || "")
-      }" ${needVal ? "" : "disabled"} />
+      ${valueControl}
       <button type="button" class="btn danger icon" data-del>×</button>
     `;
     $$("select, input", row).forEach((el) => {
@@ -853,8 +918,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         if (el.dataset.k === "table") {
           const selectedTable = SQL_SCHEMA.getTable(f.table);
           f.column = selectedTable && selectedTable.columns[0] ? selectedTable.columns[0].name : "";
+          f.value = "";
         }
-        if (el.dataset.k === "table" || el.dataset.k === "op") renderFilters();
+        if (el.dataset.k === "column") f.value = "";
+        if (el.dataset.k === "table" || el.dataset.k === "column" || el.dataset.k === "op") renderFilters();
         updateSql();
       };
       el.addEventListener("change", go);
@@ -1044,7 +1111,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#ready-month-from").value = "1";
     $("#ready-month-to").value = "12";
     $("#ready-grain").value = "person_month";
-    $("#ready-region").value = "";
+    fillReadyRegionSelect("");
     renderCatalog();
     renderSelectedStrip();
     renderModeUi();
@@ -1211,7 +1278,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     setT6Years(state.t6Years);
     $("#ready-month-from").value = String(state.t6MonthFrom);
     $("#ready-month-to").value = String(state.t6MonthTo);
-    $("#ready-region").value = state.t6Region;
+    fillReadyRegionSelect(state.t6Region);
     state.qualityProfiles = (saved.qualityProfiles || []).filter(function (id) { return SQL_SCHEMA.systemFilters.some(function (item) { return item.id === id; }); });
     state.latestPersonOnly = saved.latestPersonOnly === true;
     state.parallel8 = saved.parallel8 === true;
@@ -1397,6 +1464,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     };
     $("#ready-month-from").addEventListener("change", syncT6Parameters);
     $("#ready-month-to").addEventListener("change", syncT6Parameters);
+    $("#ready-region").addEventListener("change", syncT6Parameters);
     $("#ready-region").addEventListener("input", syncT6Parameters);
     $("#ready-grain").addEventListener("change", (event) => {
       state.salaryGrain = event.target.value;
@@ -1501,6 +1569,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   function init() {
     try {
       bind();
+      fillReadyRegionSelect(state.t6Region);
       renderReadyReports();
       renderCatalog();
       renderSelectedStrip();

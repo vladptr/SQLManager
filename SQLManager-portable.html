@@ -524,7 +524,22 @@ textarea:focus {
   align-items: center;
 }
 .filter-row {
-  grid-template-columns: 1.2fr 1.2fr 1fr 1fr auto;
+  grid-template-columns: 1.4fr 1.5fr 0.9fr 1.3fr auto;
+}
+.filter-row select,
+.filter-row input {
+  min-width: 0;
+}
+.filter-row optgroup,
+select optgroup {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 700;
+}
+.filter-row option,
+select option {
+  color: var(--text);
+  font-weight: 400;
 }
 @media (max-width: 800px) {
   .field-row,
@@ -788,6 +803,14 @@ textarea:focus {
   letter-spacing: 0.06em;
   color: var(--muted);
   margin-bottom: 8px;
+}
+.avail-subgroup {
+  margin-bottom: 10px;
+}
+.avail-subtitle {
+  font-size: 0.75rem;
+  color: var(--accent-2);
+  margin: 0 0 6px;
 }
 .avail-chips {
   display: flex;
@@ -1281,7 +1304,7 @@ footer-note code,
               <p class="hint">Оберіть задачу — вона заповнить той самий перевірений конструктор. Параметри можна змінити на наступних кроках.</p>
               <div class="template-settings-row ready-report-params">
                 <div class="t6-years-field">
-                  <span>Роки T6</span>
+                  <span>Роки</span>
                   <div id="ready-years" class="t6-year-options" role="group" aria-label="Роки таблиць T6">
                     <label><input type="checkbox" value="2021" /> 2021</label>
                     <label><input type="checkbox" value="2022" /> 2022</label>
@@ -1291,12 +1314,12 @@ footer-note code,
                     <label><input type="checkbox" value="2026" checked /> 2026</label>
                   </div>
                 </div>
-                <label>Місяць від <select id="ready-month-from"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></label>
-                <label>Місяць до <select id="ready-month-to"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option selected>12</option></select></label>
-                <label>Регіон <input id="ready-region" type="text" placeholder="необов’язково" /></label>
-                <label>Зерно <select id="ready-grain"><option value="person_month" selected>особа–місяць</option><option value="person_employer_month">особа–роботодавець–місяць</option></select></label>
-                <label>Популяція <select id="ready-population"><option value="reported">є запис T6</option><option value="positive_salary">зарплата &gt; 0</option></select></label>
-                <label>Режим <select id="ready-semantic-mode"><option value="current">актуальний</option><option value="all_history">усі історичні версії</option></select></label>
+                <label>З місяця <select id="ready-month-from"><option value="1">січень</option><option value="2">лютий</option><option value="3">березень</option><option value="4">квітень</option><option value="5">травень</option><option value="6">червень</option><option value="7">липень</option><option value="8">серпень</option><option value="9">вересень</option><option value="10">жовтень</option><option value="11">листопад</option><option value="12">грудень</option></select></label>
+                <label>По місяць <select id="ready-month-to"><option value="1">січень</option><option value="2">лютий</option><option value="3">березень</option><option value="4">квітень</option><option value="5">травень</option><option value="6">червень</option><option value="7">липень</option><option value="8">серпень</option><option value="9">вересень</option><option value="10">жовтень</option><option value="11">листопад</option><option value="12" selected>грудень</option></select></label>
+                <label>Регіон <select id="ready-region"></select></label>
+                <label>Одиниця розрахунку <select id="ready-grain"><option value="person_month" selected>одна особа за місяць</option><option value="person_employer_month">одна особа в одного роботодавця за місяць</option></select></label>
+                <label>Кого включати <select id="ready-population"><option value="reported">є нарахування за місяць</option><option value="positive_salary">зарплата більша за нуль</option></select></label>
+                <label>Які записи <select id="ready-semantic-mode"><option value="current">актуальні</option><option value="all_history">усі історичні версії</option></select></label>
               </div>
               <div id="ready-report-list" class="card-grid"></div>
             </div>
@@ -2290,6 +2313,89 @@ window.SQL_SCHEMA = {
     { code: 82, label: "Особа з інвалідністю за гіг-контрактом (Дія Сіті)" },
     { code: 83, label: "Фізична особа за гіг-контрактом (Дія Сіті)" },
   ],
+  regionGroups: [
+    {
+      id: "west",
+      label: "Захід",
+      items: [
+        { code: "07", label: "Волинська область" },
+        { code: "21", label: "Закарпатська область" },
+        { code: "26", label: "Івано-Франківська область" },
+        { code: "46", label: "Львівська область" },
+        { code: "56", label: "Рівненська область" },
+        { code: "61", label: "Тернопільська область" },
+        { code: "73", label: "Чернівецька область" },
+      ],
+    },
+    {
+      id: "center",
+      label: "Центр",
+      items: [
+        { code: "05", label: "Вінницька область" },
+        { code: "18", label: "Житомирська область" },
+        { code: "32", label: "Київська область" },
+        { code: "35", label: "Кіровоградська область" },
+        { code: "53", label: "Полтавська область" },
+        { code: "68", label: "Хмельницька область" },
+        { code: "71", label: "Черкаська область" },
+      ],
+    },
+    {
+      id: "north",
+      label: "Північ",
+      items: [
+        { code: "59", label: "Сумська область" },
+        { code: "74", label: "Чернігівська область" },
+      ],
+    },
+    {
+      id: "east",
+      label: "Схід",
+      items: [
+        { code: "12", label: "Дніпропетровська область" },
+        { code: "14", label: "Донецька область" },
+        { code: "23", label: "Запорізька область" },
+        { code: "44", label: "Луганська область" },
+        { code: "63", label: "Харківська область" },
+      ],
+    },
+    {
+      id: "south",
+      label: "Південь",
+      items: [
+        { code: "48", label: "Миколаївська область" },
+        { code: "51", label: "Одеська область" },
+        { code: "65", label: "Херсонська область" },
+      ],
+    },
+    {
+      id: "crimea",
+      label: "Крим",
+      items: [{ code: "01", label: "Автономна Республіка Крим" }],
+    },
+    {
+      id: "cities",
+      label: "Міста зі спеціальним статусом",
+      items: [
+        { code: "80", label: "м. Київ" },
+        { code: "85", label: "м. Севастополь" },
+      ],
+    },
+  ],
+  months: [
+    { code: "1", label: "січень" },
+    { code: "2", label: "лютий" },
+    { code: "3", label: "березень" },
+    { code: "4", label: "квітень" },
+    { code: "5", label: "травень" },
+    { code: "6", label: "червень" },
+    { code: "7", label: "липень" },
+    { code: "8", label: "серпень" },
+    { code: "9", label: "вересень" },
+    { code: "10", label: "жовтень" },
+    { code: "11", label: "листопад" },
+    { code: "12", label: "грудень" },
+  ],
   sources: {
     latest_person_info: {
       cte: "latest_person_info AS (\n  SELECT *\n  FROM (\n    SELECT ipi_src.*, ROW_NUMBER() OVER (PARTITION BY numident ORDER BY modify_dt DESC NULLS LAST, ip_id DESC) AS sqlm_rn\n    FROM ikis_person.insured_person_info ipi_src\n  )\n  WHERE sqlm_rn = 1\n)",
@@ -2385,6 +2491,202 @@ window.SQL_SCHEMA.getTable = function (id) {
   window.SQL_SCHEMA.physicalCatalog = physical;
   window.SQL_SCHEMA.physicalJoins = physicalEdges;
   window.SQL_SCHEMA.joins = window.SQL_SCHEMA.joins.concat(physicalEdges);
+})();
+
+(function attachColumnLookups() {
+  var schema = window.SQL_SCHEMA;
+  var COLUMN_LABELS = {
+    slb_lastprotocol: "Номер останнього протоколу",
+    slb_extended: "Ознака розширеного пакета",
+    slb_dt_unfix: "Дата розфіксації пакета",
+    slb_dt_unfix1: "Дата розфіксації (рівень 1)",
+    slb_dt_unfix5: "Дата розфіксації (рівень 5)",
+    slb_dt_fix14: "Дата фіксації (рівень 14)",
+    slb_cntrl_st: "Статус контролю",
+    slb_is_sk: "Ознака СК-пакета",
+    slb_wu: "Користувач, що створив або змінив пакет",
+    slb_scs: "Сеанс останнього контролю пакета",
+    slb_wu_unfix: "Користувач, що розфіксував пакет",
+    slb_dt_dgv: "Дата укладання договору",
+    slb_id: "Номер пакета",
+    slb_im: "Код страхувальника в пакеті"
+  };
+  var COMMENT_FIXES = {
+    "Дата розвіксаціх ярлика": "Дата розфіксації пакета",
+    "Ід коритувача що створив (можливо редагував ярлик)": "Користувач, що створив або змінив пакет",
+    "Ід сеансу останього контролю ярлика": "Сеанс останнього контролю пакета",
+    "  Дата укладання договор": "Дата укладання договору",
+    "Признак \"Актуальний\". В интерфейсе не показывается. Y/N": "Ознака актуальної версії",
+    "Признак \"Актуальний\". В интерфейсе не показывается.": "Ознака актуальної версії",
+    "Ід ярлика": "Номер пакета",
+    "Ід страхувальника": "Код страхувальника в пакеті",
+    "Ід користувача, що зафіксував звіт": "Користувач, що зафіксував звіт",
+    "Ід користувача що розфіксував": "Користувач, що розфіксував пакет",
+    "Дата фіксації ярлика": "Дата фіксації пакета"
+  };
+  var TOKEN_UK = {
+    lastprotocol: "останнього протоколу",
+    protocol: "протоколу",
+    extended: "розширений пакет",
+    unfix: "розфіксації",
+    actuality: "актуальність",
+    terminate: "розірвання",
+    correct: "коригуючий",
+    params: "параметр",
+    firm: "страхувальника",
+    phon: "телефон",
+    adr: "адреса",
+    master: "головний",
+    cntrl: "контролю",
+    charg: "звітний",
+    mnth: "місяць",
+    month: "місяць",
+    year: "рік",
+    start: "початку",
+    end: "кінця",
+    stop: "закінчення",
+    date: "дата",
+    dt: "дата",
+    wu: "користувач",
+    user: "користувач",
+    fix: "фіксації",
+    org: "орган",
+    src: "джерело",
+    st: "статус",
+    tp: "тип",
+    type: "тип",
+    sum: "сума",
+    esv: "ЄСВ",
+    id: "ідентифікатор",
+    num: "номер",
+    nn: "номер",
+    dgv: "договору",
+    dop: "сплати",
+    is: "ознака",
+    add: "додатковий",
+    rep: "звіт",
+    sk: "СК",
+    scs: "сеансу контролю",
+    recnum: "номер рядка",
+    page: "аркуш",
+    name: "назва",
+    code: "код"
+  };
+  var SKIP_PREFIXES = {
+    slb: true, ape: true, aped45: true, aped46: true, aped52: true,
+    ape45: true, ape46: true, iac: true, iab: true, ian: true
+  };
+  var GROUP_ORDER = [
+    { id: "territory", label: "Територія" },
+    { id: "identity", label: "Ідентифікатори" },
+    { id: "period", label: "Дати та період" },
+    { id: "money", label: "Суми та показники" },
+    { id: "status", label: "Ознаки та статуси" },
+    { id: "other", label: "Інші поля" }
+  ];
+
+  function humanizeTechnicalName(name) {
+    var raw = String(name || "");
+    if (!/_/.test(raw) && raw === raw.toLowerCase()) return "";
+    var tokens = raw.toLowerCase().split("_").filter(Boolean);
+    if (tokens.length && SKIP_PREFIXES[tokens[0]]) tokens = tokens.slice(1);
+    if (!tokens.length) return "";
+    var words = [];
+    var nums = [];
+    tokens.forEach(function (token) {
+      if (/^\d+$/.test(token)) { nums.push(token); return; }
+      words.push(TOKEN_UK[token] || token);
+    });
+    if (!words.length) return "";
+    var text = words.join(" ");
+    text = text.charAt(0).toUpperCase() + text.slice(1);
+    if (nums.length) text += " (" + nums.join(", ") + ")";
+    return text;
+  }
+
+  function friendlyColumnLabel(column) {
+    var name = String((column && column.name) || "").toLowerCase();
+    var current = String((column && (column.label || column.comment)) || "").trim();
+    if (COMMENT_FIXES[current]) return COMMENT_FIXES[current];
+    var isTechnical = !current || current.toLowerCase() === name || current.toUpperCase() === name.toUpperCase();
+    if (isTechnical && COLUMN_LABELS[name]) return COLUMN_LABELS[name];
+    if (!isTechnical) return current;
+    return humanizeTechnicalName(name) || current || name;
+  }
+
+  function columnGroup(column) {
+    var name = String((column && column.name) || "").toLowerCase();
+    var label = String((column && column.label) || "");
+    var type = String((column && column.type) || "").toUpperCase();
+    if (/^(reg|ru_|mrd_reg|iac_ru)|region|област|територ/i.test(name + " " + label)) return GROUP_ORDER[0];
+    if (/id$|_id$|kod_|code|edrpou|numident|ident|ім'|ім’я|прізв|назв/i.test(name + " " + label)) return GROUP_ORDER[1];
+    if (type === "DATE" || /dt$|_dt_|year|mnth|month|дата|місяць|рік|період/i.test(name + " " + label)) return GROUP_ORDER[2];
+    if (type === "NUMBER" && /sum|esv|pay|salary|фонд|сума|внеск|утрим/i.test(name + " " + label)) return GROUP_ORDER[3];
+    if (/st$|_st_|flag|fixed|actual|ознака|статус|is_|otk|sex|кат/i.test(name + " " + label)) return GROUP_ORDER[4];
+    return GROUP_ORDER[5];
+  }
+
+  function zoLookupGroups() {
+    var military = {};
+    var disability = {};
+    ((schema.zoFilterGroups && schema.zoFilterGroups.military) || []).forEach(function (code) { military[code] = true; });
+    ((schema.zoFilterGroups && schema.zoFilterGroups.disability) || []).forEach(function (code) { disability[code] = true; });
+    var groups = [
+      { label: "Військові", items: [] },
+      { label: "Особи з інвалідністю", items: [] },
+      { label: "Інші категорії", items: [] }
+    ];
+    (schema.zoCategories || []).forEach(function (item) {
+      var entry = { code: String(item.code), label: item.code + " — " + item.label };
+      if (military[item.code]) groups[0].items.push(entry);
+      else if (disability[item.code]) groups[1].items.push(entry);
+      else groups[2].items.push(entry);
+    });
+    return groups.filter(function (group) { return group.items.length; });
+  }
+
+  function lookupForColumn(tableId, columnName) {
+    var table = schema.getTable(tableId);
+    var column = table && (table.columns || []).find(function (item) {
+      return String(item.name).toLowerCase() === String(columnName || "").toLowerCase();
+    });
+    var name = String(columnName || "").toLowerCase();
+    if (/^(reg|ru_code|mrd_reg_code)$/.test(name)) {
+      return { id: "region", groups: schema.regionGroups, empty: "усі регіони / оберіть" };
+    }
+    if (/(^|_)mnth$|month/.test(name) && (!column || String(column.type).toUpperCase() === "NUMBER")) {
+      return { id: "month", groups: [{ label: "Місяці", items: schema.months }], empty: "оберіть місяць" };
+    }
+    if (/^(sex|aped46_sex)$/.test(name)) {
+      return {
+        id: "sex",
+        groups: [{ label: "Стать", items: [{ code: "1", label: "чоловіча" }, { code: "2", label: "жіноча" }] }],
+        empty: "оберіть стать"
+      };
+    }
+    if (/^(kat_zo|aped46_zo)$/.test(name)) {
+      return { id: "zo", groups: zoLookupGroups(), empty: "оберіть категорію ЗО" };
+    }
+    if (/^(slb_fixed|slb_actuality|slb_is_add_rep|slb_is_correct|slb_extended|slb_is_sk)$/.test(name)) {
+      return {
+        id: "yesno",
+        groups: [{ label: "Ознака", items: [{ code: "Y", label: "Так (Y)" }, { code: "N", label: "Ні (N)" }] }],
+        empty: "оберіть значення"
+      };
+    }
+    return null;
+  }
+
+  (schema.tables || []).forEach(function (table) {
+    (table.columns || []).forEach(function (column) {
+      column.label = friendlyColumnLabel(column);
+    });
+  });
+
+  schema.columnGroups = GROUP_ORDER;
+  schema.friendlyColumnLabel = friendlyColumnLabel;
+  schema.columnGroup = columnGroup;
+  schema.lookupForColumn = lookupForColumn;
 })();
 
 </script>
@@ -3302,11 +3604,11 @@ window.TemplateUtils = (function () {
   let catalogRenderCount = 0;
   const MAX_STEP = 6;
   const READY_REPORTS = [
-    { id: "salary_kved_region", label: "Середньомісячна зарплата за регіоном і актуальним КВЕД — потребує бізнес-правила", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["avg_monthly_salary_period"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
-    { id: "people_kved_month", label: "Кількість застрахованих осіб за місяцями та КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["people_count"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
+    { id: "salary_kved_region", label: "Середня зарплата за регіоном і КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["avg_monthly_salary_period"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
+    { id: "people_kved_month", label: "Кількість осіб за місяцями та КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["people_count"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
     { id: "payroll_esv", label: "Фонд зарплати й внески ЄСВ", tables: ["t6_2026_edrpou"], metrics: ["payroll", "contributions"], fields: [], grain: "person_month" },
     { id: "current_insurer", label: "Поточний профіль страхувальника", tables: ["pinsur_main", "pinsur_ankt_a"], metrics: [], fields: [], grain: "person_employer_month" },
-    { id: "position_as_of_month", label: "Посада особи станом на місяць T6", tables: ["t6_2026_edrpou", "sm_ape4_5data"], metrics: [], fields: [], grain: "person_employer_month", route: "position_as_of_t6_month" }
+    { id: "position_as_of_month", label: "Посада особи на місяць звіту", tables: ["t6_2026_edrpou", "sm_ape4_5data"], metrics: [], fields: [], grain: "person_employer_month", route: "position_as_of_t6_month" }
   ];
   const TEMPLATE_SCRIPTS = [
     {
@@ -3440,6 +3742,29 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     const t = SQL_SCHEMA.getTable(tableId);
     const item = t && t.columns.find((x) => x.name === col);
     return (item && item.label) || col;
+  }
+  function optionLabel(item) {
+    const code = item.code != null ? String(item.code) : "";
+    const label = String(item.label || code);
+    return code && label.indexOf("(" + code + ")") < 0 ? `${label} (${code})` : label;
+  }
+  function groupedOptionsHtml(groups, selected, emptyLabel) {
+    let html = emptyLabel != null ? `<option value="">${safeText(emptyLabel)}</option>` : "";
+    (groups || []).forEach((group) => {
+      const items = (group.items || [])
+        .map((item) => {
+          const value = item.code != null ? item.code : item.value;
+          return `<option value="${safeText(value)}" ${String(value) === String(selected || "") ? "selected" : ""}>${safeText(optionLabel(item))}</option>`;
+        })
+        .join("");
+      html += `<optgroup label="${safeText(group.label)}">${items}</optgroup>`;
+    });
+    return html;
+  }
+  function fillReadyRegionSelect(selected) {
+    const select = $("#ready-region");
+    if (!select) return;
+    select.innerHTML = groupedOptionsHtml(SQL_SCHEMA.regionGroups || [], selected, "усі регіони");
   }
   function notify(msg, ok = true) {
     const el = $("#toast");
@@ -3680,11 +4005,36 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   }
   function colOptions(tableId, selected) {
     const item = SQL_SCHEMA.getTable(tableId);
-    return ((item && item.columns) || [])
-      .map(
-        (c) =>
-          `<option value="${safeText(c.name)}" ${c.name === selected ? "selected" : ""}>${safeText(c.label)}</option>`
-      )
+    const columns = (item && item.columns) || [];
+    const option = (c) =>
+      `<option value="${safeText(c.name)}" ${c.name === selected ? "selected" : ""}>${safeText(c.label)}</option>`;
+    const grouped = new Map();
+    columns.forEach((c) => {
+      const group = SQL_SCHEMA.columnGroup ? SQL_SCHEMA.columnGroup(c) : { id: "other", label: "Інші поля" };
+      if (!grouped.has(group.id)) grouped.set(group.id, { label: group.label, items: [] });
+      grouped.get(group.id).items.push(c);
+    });
+    const order = SQL_SCHEMA.columnGroups || [];
+    if (grouped.size <= 1) return columns.map(option).join("");
+    return order
+      .filter((group) => grouped.has(group.id))
+      .map((group) => `<optgroup label="${safeText(group.label)}">${grouped.get(group.id).items.map(option).join("")}</optgroup>`)
+      .join("");
+  }
+  function tableOptions(selectedId) {
+    const grouped = new Map();
+    state.tables.forEach((id) => {
+      const table = SQL_SCHEMA.getTable(id);
+      const ui = table && window.SQL_CATALOG_UI && SQL_CATALOG_UI.get(table);
+      const label = (ui && SQL_CATALOG_UI.categoryLabels && SQL_CATALOG_UI.categoryLabels[ui.category]) || "Інші джерела";
+      if (!grouped.has(label)) grouped.set(label, []);
+      grouped.get(label).push(id);
+    });
+    const option = (id) =>
+      `<option value="${safeText(id)}" ${id === selectedId ? "selected" : ""}>${safeText(tLabel(id))}</option>`;
+    if (grouped.size <= 1) return state.tables.map(option).join("");
+    return [...grouped.entries()]
+      .map(([label, ids]) => `<optgroup label="${safeText(label)}">${ids.map(option).join("")}</optgroup>`)
       .join("");
   }
   function renderModeUi() {
@@ -3712,36 +4062,54 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       const box = document.createElement("div");
       box.className = "avail-group";
       box.innerHTML = `<div class="avail-title">${safeText(t.label)}</div>`;
-      const chips = document.createElement("div");
-      chips.className = "avail-chips";
-      t.columns.forEach((c) => {
-        const already = state.fields.some(
-          (f) => f.table === tid && f.column === c.name
-        );
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "avail-chip" + (already ? " used" : "");
-        btn.disabled = already;
-        btn.innerHTML = already
-          ? `<span>${safeText(c.label)}</span><span class="chip-tag">вже додано</span>`
-          : `<span>${safeText(c.label)}</span><span class="chip-plus">+</span>`;
-        btn.title = already ? "Уже у відповіді" : "Додати у відповідь";
-        if (!already) {
-          btn.addEventListener("click", () => {
-            state.fields.push({
-              table: tid,
-              column: c.name,
-              agg: "",
-              outAlias: "",
-            });
-            renderFields();
-            renderOrder();
-            updateSql();
-          });
-        }
-        chips.appendChild(btn);
+      const grouped = new Map();
+      (t.columns || []).forEach((c) => {
+        const group = SQL_SCHEMA.columnGroup ? SQL_SCHEMA.columnGroup(c) : { id: "other", label: "Інші поля" };
+        if (!grouped.has(group.id)) grouped.set(group.id, { label: group.label, items: [] });
+        grouped.get(group.id).items.push(c);
       });
-      box.appendChild(chips);
+      const groups = (SQL_SCHEMA.columnGroups || [{ id: "other", label: "Інші поля" }]).filter((group) => grouped.has(group.id));
+      groups.forEach((group) => {
+        const subgroup = document.createElement("div");
+        subgroup.className = "avail-subgroup";
+        if (groups.length > 1) {
+          const heading = document.createElement("div");
+          heading.className = "avail-subtitle";
+          heading.textContent = grouped.get(group.id).label;
+          subgroup.appendChild(heading);
+        }
+        const chips = document.createElement("div");
+        chips.className = "avail-chips";
+        grouped.get(group.id).items.forEach((c) => {
+          const already = state.fields.some(
+            (f) => f.table === tid && f.column === c.name
+          );
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "avail-chip" + (already ? " used" : "");
+          btn.disabled = already;
+          btn.innerHTML = already
+            ? `<span>${safeText(c.label)}</span><span class="chip-tag">вже додано</span>`
+            : `<span>${safeText(c.label)}</span><span class="chip-plus">+</span>`;
+          btn.title = already ? "Уже у відповіді" : "Додати у відповідь";
+          if (!already) {
+            btn.addEventListener("click", () => {
+              state.fields.push({
+                table: tid,
+                column: c.name,
+                agg: "",
+                outAlias: "",
+              });
+              renderFields();
+              renderOrder();
+              updateSql();
+            });
+          }
+          chips.appendChild(btn);
+        });
+        subgroup.appendChild(chips);
+        box.appendChild(subgroup);
+      });
       avail.appendChild(box);
     });
     if (countEl) countEl.textContent = String(state.fields.length);
@@ -4088,12 +4456,6 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   function filterRow(f, idx) {
     const row = document.createElement("div");
     row.className = "filter-row";
-    const tables = state.tables
-      .map(
-        (id) =>
-          `<option value="${safeText(id)}" ${id === f.table ? "selected" : ""}>${safeText(tLabel(id))}</option>`
-      )
-      .join("");
     const ops = SQL_SCHEMA.operators
       .map(
         (o) =>
@@ -4101,21 +4463,26 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       )
       .join("");
     const needVal = f.op !== "IS NULL" && f.op !== "IS NOT NULL";
+    const lookup = needVal && SQL_SCHEMA.lookupForColumn ? SQL_SCHEMA.lookupForColumn(f.table, f.column) : null;
+    const useLookup = !!(lookup && (f.op === "=" || f.op === "!="));
     const ph =
       f.op === "BETWEEN"
         ? "від, до"
-        : f.op === "IN"
+        : f.op === "IN" || f.op === "NOT IN"
           ? "a, b, c"
           : f.op === "LIKE" || f.op === "LIKE_UPPER"
             ? "фрагмент"
             : "значення";
+    const valueControl = !needVal
+      ? `<input type="text" data-k="value" disabled />`
+      : useLookup
+        ? `<select data-k="value">${groupedOptionsHtml(lookup.groups, f.value, lookup.empty)}</select>`
+        : `<input type="text" data-k="value" placeholder="${safeText(ph)}" value="${safeText(f.value || "")}" />`;
     row.innerHTML = `
-      <select data-k="table">${tables}</select>
-      <select data-k="column">${colOptions(f.table, f.column)}</select>
+      <select data-k="table" title="${safeText(tLabel(f.table))}">${tableOptions(f.table)}</select>
+      <select data-k="column" title="${safeText(cLabel(f.table, f.column))}">${colOptions(f.table, f.column)}</select>
       <select data-k="op">${ops}</select>
-      <input type="text" data-k="value" placeholder="${safeText(ph)}" value="${
-        safeText(f.value || "")
-      }" ${needVal ? "" : "disabled"} />
+      ${valueControl}
       <button type="button" class="btn danger icon" data-del>×</button>
     `;
     $$("select, input", row).forEach((el) => {
@@ -4124,8 +4491,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         if (el.dataset.k === "table") {
           const selectedTable = SQL_SCHEMA.getTable(f.table);
           f.column = selectedTable && selectedTable.columns[0] ? selectedTable.columns[0].name : "";
+          f.value = "";
         }
-        if (el.dataset.k === "table" || el.dataset.k === "op") renderFilters();
+        if (el.dataset.k === "column") f.value = "";
+        if (el.dataset.k === "table" || el.dataset.k === "column" || el.dataset.k === "op") renderFilters();
         updateSql();
       };
       el.addEventListener("change", go);
@@ -4315,7 +4684,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#ready-month-from").value = "1";
     $("#ready-month-to").value = "12";
     $("#ready-grain").value = "person_month";
-    $("#ready-region").value = "";
+    fillReadyRegionSelect("");
     renderCatalog();
     renderSelectedStrip();
     renderModeUi();
@@ -4482,7 +4851,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     setT6Years(state.t6Years);
     $("#ready-month-from").value = String(state.t6MonthFrom);
     $("#ready-month-to").value = String(state.t6MonthTo);
-    $("#ready-region").value = state.t6Region;
+    fillReadyRegionSelect(state.t6Region);
     state.qualityProfiles = (saved.qualityProfiles || []).filter(function (id) { return SQL_SCHEMA.systemFilters.some(function (item) { return item.id === id; }); });
     state.latestPersonOnly = saved.latestPersonOnly === true;
     state.parallel8 = saved.parallel8 === true;
@@ -4668,6 +5037,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     };
     $("#ready-month-from").addEventListener("change", syncT6Parameters);
     $("#ready-month-to").addEventListener("change", syncT6Parameters);
+    $("#ready-region").addEventListener("change", syncT6Parameters);
     $("#ready-region").addEventListener("input", syncT6Parameters);
     $("#ready-grain").addEventListener("change", (event) => {
       state.salaryGrain = event.target.value;
@@ -4772,6 +5142,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   function init() {
     try {
       bind();
+      fillReadyRegionSelect(state.t6Region);
       renderReadyReports();
       renderCatalog();
       renderSelectedStrip();

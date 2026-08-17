@@ -712,6 +712,89 @@ window.SQL_SCHEMA = {
     { code: 82, label: "Особа з інвалідністю за гіг-контрактом (Дія Сіті)" },
     { code: 83, label: "Фізична особа за гіг-контрактом (Дія Сіті)" },
   ],
+  regionGroups: [
+    {
+      id: "west",
+      label: "Захід",
+      items: [
+        { code: "07", label: "Волинська область" },
+        { code: "21", label: "Закарпатська область" },
+        { code: "26", label: "Івано-Франківська область" },
+        { code: "46", label: "Львівська область" },
+        { code: "56", label: "Рівненська область" },
+        { code: "61", label: "Тернопільська область" },
+        { code: "73", label: "Чернівецька область" },
+      ],
+    },
+    {
+      id: "center",
+      label: "Центр",
+      items: [
+        { code: "05", label: "Вінницька область" },
+        { code: "18", label: "Житомирська область" },
+        { code: "32", label: "Київська область" },
+        { code: "35", label: "Кіровоградська область" },
+        { code: "53", label: "Полтавська область" },
+        { code: "68", label: "Хмельницька область" },
+        { code: "71", label: "Черкаська область" },
+      ],
+    },
+    {
+      id: "north",
+      label: "Північ",
+      items: [
+        { code: "59", label: "Сумська область" },
+        { code: "74", label: "Чернігівська область" },
+      ],
+    },
+    {
+      id: "east",
+      label: "Схід",
+      items: [
+        { code: "12", label: "Дніпропетровська область" },
+        { code: "14", label: "Донецька область" },
+        { code: "23", label: "Запорізька область" },
+        { code: "44", label: "Луганська область" },
+        { code: "63", label: "Харківська область" },
+      ],
+    },
+    {
+      id: "south",
+      label: "Південь",
+      items: [
+        { code: "48", label: "Миколаївська область" },
+        { code: "51", label: "Одеська область" },
+        { code: "65", label: "Херсонська область" },
+      ],
+    },
+    {
+      id: "crimea",
+      label: "Крим",
+      items: [{ code: "01", label: "Автономна Республіка Крим" }],
+    },
+    {
+      id: "cities",
+      label: "Міста зі спеціальним статусом",
+      items: [
+        { code: "80", label: "м. Київ" },
+        { code: "85", label: "м. Севастополь" },
+      ],
+    },
+  ],
+  months: [
+    { code: "1", label: "січень" },
+    { code: "2", label: "лютий" },
+    { code: "3", label: "березень" },
+    { code: "4", label: "квітень" },
+    { code: "5", label: "травень" },
+    { code: "6", label: "червень" },
+    { code: "7", label: "липень" },
+    { code: "8", label: "серпень" },
+    { code: "9", label: "вересень" },
+    { code: "10", label: "жовтень" },
+    { code: "11", label: "листопад" },
+    { code: "12", label: "грудень" },
+  ],
   sources: {
     latest_person_info: {
       cte: "latest_person_info AS (\n  SELECT *\n  FROM (\n    SELECT ipi_src.*, ROW_NUMBER() OVER (PARTITION BY numident ORDER BY modify_dt DESC NULLS LAST, ip_id DESC) AS sqlm_rn\n    FROM ikis_person.insured_person_info ipi_src\n  )\n  WHERE sqlm_rn = 1\n)",
@@ -807,4 +890,200 @@ window.SQL_SCHEMA.getTable = function (id) {
   window.SQL_SCHEMA.physicalCatalog = physical;
   window.SQL_SCHEMA.physicalJoins = physicalEdges;
   window.SQL_SCHEMA.joins = window.SQL_SCHEMA.joins.concat(physicalEdges);
+})();
+
+(function attachColumnLookups() {
+  var schema = window.SQL_SCHEMA;
+  var COLUMN_LABELS = {
+    slb_lastprotocol: "Номер останнього протоколу",
+    slb_extended: "Ознака розширеного пакета",
+    slb_dt_unfix: "Дата розфіксації пакета",
+    slb_dt_unfix1: "Дата розфіксації (рівень 1)",
+    slb_dt_unfix5: "Дата розфіксації (рівень 5)",
+    slb_dt_fix14: "Дата фіксації (рівень 14)",
+    slb_cntrl_st: "Статус контролю",
+    slb_is_sk: "Ознака СК-пакета",
+    slb_wu: "Користувач, що створив або змінив пакет",
+    slb_scs: "Сеанс останнього контролю пакета",
+    slb_wu_unfix: "Користувач, що розфіксував пакет",
+    slb_dt_dgv: "Дата укладання договору",
+    slb_id: "Номер пакета",
+    slb_im: "Код страхувальника в пакеті"
+  };
+  var COMMENT_FIXES = {
+    "Дата розвіксаціх ярлика": "Дата розфіксації пакета",
+    "Ід коритувача що створив (можливо редагував ярлик)": "Користувач, що створив або змінив пакет",
+    "Ід сеансу останього контролю ярлика": "Сеанс останнього контролю пакета",
+    "  Дата укладання договор": "Дата укладання договору",
+    "Признак \"Актуальний\". В интерфейсе не показывается. Y/N": "Ознака актуальної версії",
+    "Признак \"Актуальний\". В интерфейсе не показывается.": "Ознака актуальної версії",
+    "Ід ярлика": "Номер пакета",
+    "Ід страхувальника": "Код страхувальника в пакеті",
+    "Ід користувача, що зафіксував звіт": "Користувач, що зафіксував звіт",
+    "Ід користувача що розфіксував": "Користувач, що розфіксував пакет",
+    "Дата фіксації ярлика": "Дата фіксації пакета"
+  };
+  var TOKEN_UK = {
+    lastprotocol: "останнього протоколу",
+    protocol: "протоколу",
+    extended: "розширений пакет",
+    unfix: "розфіксації",
+    actuality: "актуальність",
+    terminate: "розірвання",
+    correct: "коригуючий",
+    params: "параметр",
+    firm: "страхувальника",
+    phon: "телефон",
+    adr: "адреса",
+    master: "головний",
+    cntrl: "контролю",
+    charg: "звітний",
+    mnth: "місяць",
+    month: "місяць",
+    year: "рік",
+    start: "початку",
+    end: "кінця",
+    stop: "закінчення",
+    date: "дата",
+    dt: "дата",
+    wu: "користувач",
+    user: "користувач",
+    fix: "фіксації",
+    org: "орган",
+    src: "джерело",
+    st: "статус",
+    tp: "тип",
+    type: "тип",
+    sum: "сума",
+    esv: "ЄСВ",
+    id: "ідентифікатор",
+    num: "номер",
+    nn: "номер",
+    dgv: "договору",
+    dop: "сплати",
+    is: "ознака",
+    add: "додатковий",
+    rep: "звіт",
+    sk: "СК",
+    scs: "сеансу контролю",
+    recnum: "номер рядка",
+    page: "аркуш",
+    name: "назва",
+    code: "код"
+  };
+  var SKIP_PREFIXES = {
+    slb: true, ape: true, aped45: true, aped46: true, aped52: true,
+    ape45: true, ape46: true, iac: true, iab: true, ian: true
+  };
+  var GROUP_ORDER = [
+    { id: "territory", label: "Територія" },
+    { id: "identity", label: "Ідентифікатори" },
+    { id: "period", label: "Дати та період" },
+    { id: "money", label: "Суми та показники" },
+    { id: "status", label: "Ознаки та статуси" },
+    { id: "other", label: "Інші поля" }
+  ];
+
+  function humanizeTechnicalName(name) {
+    var raw = String(name || "");
+    if (!/_/.test(raw) && raw === raw.toLowerCase()) return "";
+    var tokens = raw.toLowerCase().split("_").filter(Boolean);
+    if (tokens.length && SKIP_PREFIXES[tokens[0]]) tokens = tokens.slice(1);
+    if (!tokens.length) return "";
+    var words = [];
+    var nums = [];
+    tokens.forEach(function (token) {
+      if (/^\d+$/.test(token)) { nums.push(token); return; }
+      words.push(TOKEN_UK[token] || token);
+    });
+    if (!words.length) return "";
+    var text = words.join(" ");
+    text = text.charAt(0).toUpperCase() + text.slice(1);
+    if (nums.length) text += " (" + nums.join(", ") + ")";
+    return text;
+  }
+
+  function friendlyColumnLabel(column) {
+    var name = String((column && column.name) || "").toLowerCase();
+    var current = String((column && (column.label || column.comment)) || "").trim();
+    if (COMMENT_FIXES[current]) return COMMENT_FIXES[current];
+    var isTechnical = !current || current.toLowerCase() === name || current.toUpperCase() === name.toUpperCase();
+    if (isTechnical && COLUMN_LABELS[name]) return COLUMN_LABELS[name];
+    if (!isTechnical) return current;
+    return humanizeTechnicalName(name) || current || name;
+  }
+
+  function columnGroup(column) {
+    var name = String((column && column.name) || "").toLowerCase();
+    var label = String((column && column.label) || "");
+    var type = String((column && column.type) || "").toUpperCase();
+    if (/^(reg|ru_|mrd_reg|iac_ru)|region|област|територ/i.test(name + " " + label)) return GROUP_ORDER[0];
+    if (/id$|_id$|kod_|code|edrpou|numident|ident|ім'|ім’я|прізв|назв/i.test(name + " " + label)) return GROUP_ORDER[1];
+    if (type === "DATE" || /dt$|_dt_|year|mnth|month|дата|місяць|рік|період/i.test(name + " " + label)) return GROUP_ORDER[2];
+    if (type === "NUMBER" && /sum|esv|pay|salary|фонд|сума|внеск|утрим/i.test(name + " " + label)) return GROUP_ORDER[3];
+    if (/st$|_st_|flag|fixed|actual|ознака|статус|is_|otk|sex|кат/i.test(name + " " + label)) return GROUP_ORDER[4];
+    return GROUP_ORDER[5];
+  }
+
+  function zoLookupGroups() {
+    var military = {};
+    var disability = {};
+    ((schema.zoFilterGroups && schema.zoFilterGroups.military) || []).forEach(function (code) { military[code] = true; });
+    ((schema.zoFilterGroups && schema.zoFilterGroups.disability) || []).forEach(function (code) { disability[code] = true; });
+    var groups = [
+      { label: "Військові", items: [] },
+      { label: "Особи з інвалідністю", items: [] },
+      { label: "Інші категорії", items: [] }
+    ];
+    (schema.zoCategories || []).forEach(function (item) {
+      var entry = { code: String(item.code), label: item.code + " — " + item.label };
+      if (military[item.code]) groups[0].items.push(entry);
+      else if (disability[item.code]) groups[1].items.push(entry);
+      else groups[2].items.push(entry);
+    });
+    return groups.filter(function (group) { return group.items.length; });
+  }
+
+  function lookupForColumn(tableId, columnName) {
+    var table = schema.getTable(tableId);
+    var column = table && (table.columns || []).find(function (item) {
+      return String(item.name).toLowerCase() === String(columnName || "").toLowerCase();
+    });
+    var name = String(columnName || "").toLowerCase();
+    if (/^(reg|ru_code|mrd_reg_code)$/.test(name)) {
+      return { id: "region", groups: schema.regionGroups, empty: "усі регіони / оберіть" };
+    }
+    if (/(^|_)mnth$|month/.test(name) && (!column || String(column.type).toUpperCase() === "NUMBER")) {
+      return { id: "month", groups: [{ label: "Місяці", items: schema.months }], empty: "оберіть місяць" };
+    }
+    if (/^(sex|aped46_sex)$/.test(name)) {
+      return {
+        id: "sex",
+        groups: [{ label: "Стать", items: [{ code: "1", label: "чоловіча" }, { code: "2", label: "жіноча" }] }],
+        empty: "оберіть стать"
+      };
+    }
+    if (/^(kat_zo|aped46_zo)$/.test(name)) {
+      return { id: "zo", groups: zoLookupGroups(), empty: "оберіть категорію ЗО" };
+    }
+    if (/^(slb_fixed|slb_actuality|slb_is_add_rep|slb_is_correct|slb_extended|slb_is_sk)$/.test(name)) {
+      return {
+        id: "yesno",
+        groups: [{ label: "Ознака", items: [{ code: "Y", label: "Так (Y)" }, { code: "N", label: "Ні (N)" }] }],
+        empty: "оберіть значення"
+      };
+    }
+    return null;
+  }
+
+  (schema.tables || []).forEach(function (table) {
+    (table.columns || []).forEach(function (column) {
+      column.label = friendlyColumnLabel(column);
+    });
+  });
+
+  schema.columnGroups = GROUP_ORDER;
+  schema.friendlyColumnLabel = friendlyColumnLabel;
+  schema.columnGroup = columnGroup;
+  schema.lookupForColumn = lookupForColumn;
 })();

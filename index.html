@@ -41,7 +41,7 @@
               <p class="hint">Оберіть задачу — вона заповнить той самий перевірений конструктор. Параметри можна змінити на наступних кроках.</p>
               <div class="template-settings-row ready-report-params">
                 <div class="t6-years-field">
-                  <span>Роки T6</span>
+                  <span>Роки</span>
                   <div id="ready-years" class="t6-year-options" role="group" aria-label="Роки таблиць T6">
                     <label><input type="checkbox" value="2021" /> 2021</label>
                     <label><input type="checkbox" value="2022" /> 2022</label>
@@ -51,12 +51,12 @@
                     <label><input type="checkbox" value="2026" checked /> 2026</label>
                   </div>
                 </div>
-                <label>Місяць від <select id="ready-month-from"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></label>
-                <label>Місяць до <select id="ready-month-to"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option selected>12</option></select></label>
-                <label>Регіон <input id="ready-region" type="text" placeholder="необов’язково" /></label>
-                <label>Зерно <select id="ready-grain"><option value="person_month" selected>особа–місяць</option><option value="person_employer_month">особа–роботодавець–місяць</option></select></label>
-                <label>Популяція <select id="ready-population"><option value="reported">є запис T6</option><option value="positive_salary">зарплата &gt; 0</option></select></label>
-                <label>Режим <select id="ready-semantic-mode"><option value="current">актуальний</option><option value="all_history">усі історичні версії</option></select></label>
+                <label>З місяця <select id="ready-month-from"><option value="1">січень</option><option value="2">лютий</option><option value="3">березень</option><option value="4">квітень</option><option value="5">травень</option><option value="6">червень</option><option value="7">липень</option><option value="8">серпень</option><option value="9">вересень</option><option value="10">жовтень</option><option value="11">листопад</option><option value="12">грудень</option></select></label>
+                <label>По місяць <select id="ready-month-to"><option value="1">січень</option><option value="2">лютий</option><option value="3">березень</option><option value="4">квітень</option><option value="5">травень</option><option value="6">червень</option><option value="7">липень</option><option value="8">серпень</option><option value="9">вересень</option><option value="10">жовтень</option><option value="11">листопад</option><option value="12" selected>грудень</option></select></label>
+                <label>Регіон <select id="ready-region"></select></label>
+                <label>Одиниця розрахунку <select id="ready-grain"><option value="person_month" selected>одна особа за місяць</option><option value="person_employer_month">одна особа в одного роботодавця за місяць</option></select></label>
+                <label>Кого включати <select id="ready-population"><option value="reported">є нарахування за місяць</option><option value="positive_salary">зарплата більша за нуль</option></select></label>
+                <label>Які записи <select id="ready-semantic-mode"><option value="current">актуальні</option><option value="all_history">усі історичні версії</option></select></label>
               </div>
               <div id="ready-report-list" class="card-grid"></div>
             </div>

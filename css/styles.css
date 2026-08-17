@@ -517,7 +517,22 @@ textarea:focus {
   align-items: center;
 }
 .filter-row {
-  grid-template-columns: 1.2fr 1.2fr 1fr 1fr auto;
+  grid-template-columns: 1.4fr 1.5fr 0.9fr 1.3fr auto;
+}
+.filter-row select,
+.filter-row input {
+  min-width: 0;
+}
+.filter-row optgroup,
+select optgroup {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 700;
+}
+.filter-row option,
+select option {
+  color: var(--text);
+  font-weight: 400;
 }
 @media (max-width: 800px) {
   .field-row,
@@ -781,6 +796,14 @@ textarea:focus {
   letter-spacing: 0.06em;
   color: var(--muted);
   margin-bottom: 8px;
+}
+.avail-subgroup {
+  margin-bottom: 10px;
+}
+.avail-subtitle {
+  font-size: 0.75rem;
+  color: var(--accent-2);
+  margin: 0 0 6px;
 }
 .avail-chips {
   display: flex;
