@@ -7,6 +7,7 @@ $runtimeFiles = @(
   "$PSScriptRoot\..\js\preset-store.js",
   "$PSScriptRoot\..\js\wizard-state.js",
   "$PSScriptRoot\..\js\app.js"
+  "$PSScriptRoot\..\js\oracle-export.js"
 )
 foreach ($runtimeFile in $runtimeFiles) {
   $runtimeSource = [IO.File]::ReadAllText((Resolve-Path $runtimeFile), [Text.Encoding]::UTF8)
@@ -45,3 +46,5 @@ $result.results | ForEach-Object {
 }
 if ($result.failed -gt 0) { exit 1 }
 Write-Host "Усі тести пройдено: $($result.passed)" -ForegroundColor Green
+& "$PSScriptRoot\run-oracle-tests.ps1"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

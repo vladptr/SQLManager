@@ -883,6 +883,17 @@ select option {
   color: var(--muted);
   font-weight: 500;
 }
+.oracle-export-card { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(42, 157, 143, 0.05); }
+.oracle-export-card h3 { margin: 0 0 8px; font-size: 1rem; }
+.oracle-health-line { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.oracle-health-dot { width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.oracle-health-dot.connected { background: var(--accent); box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.18); }
+.oracle-health-dot.error { background: #e76f51; }
+.oracle-export-status { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.oracle-export-actions { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+.oracle-export-actions label { min-width: 150px; }
+.oracle-export-actions select { width: 100%; }
+@media (max-width: 520px) { .oracle-export-actions > *, .oracle-export-actions label { width: 100%; } }
 .chosen-card {
   display: grid;
   grid-template-columns: 28px 1fr auto;

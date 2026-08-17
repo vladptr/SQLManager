@@ -217,9 +217,53 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#btn-next").textContent =
       state.step >= MAX_STEP ? "Оновити SQL" : "Далі";
   }
+  function ensureCatalogUi() {
+    if (window.SQL_CATALOG_UI && typeof window.SQL_CATALOG_UI.get === "function" && typeof window.SQL_CATALOG_UI.search === "function") return window.SQL_CATALOG_UI;
+    const coreNames = {
+      T6_2026_EDRPOU: true, INSURED_PERSON_INFO: true, INSURED_PERSON: true,
+      SM_PACKLABEL: true, SM_APE4_6DATA: true, SM_APE4_5DATA: true,
+      PINSUR_MAIN: true, PINSUR_CHNG_DOC: true, PINSUR_ANKT_A: true, PINSUR_ANKT_C: true,
+      PINSUR_KVED_HST: true, PINSUR_KVED: true, NSI_KVED: true, NSI_REGION_UKR: true,
+      MRDORG: true, SK_APEQ_DODATOK2_DATA: true, SK_PACKLABEL: true, SK_PACKLABEL_EXTENDED: true
+    };
+    function physicalName(table) { return String(table.name || String(table.fullName || "").split(".").pop()).toUpperCase(); }
+    function schemaName(table) { return String(table.schema || String(table.fullName || "").split(".")[0] || "WORK").toUpperCase(); }
+    function metadata(table) {
+      return {
+        visibility: coreNames[physicalName(table)] ? "core" : "advanced",
+        priority: coreNames[physicalName(table)] ? 100 : 0,
+        category: table.group || "work",
+        label: table.label || physicalName(table),
+        description: table.description || "",
+        schema: schemaName(table), grain: table.grain || "не описано", role: "факт", availability: "доступна"
+      };
+    }
+    window.SQL_CATALOG_UI = {
+      categories: [{ id: "work", label: "Доступні джерела" }],
+      categoryLabels: { work: "Доступні джерела" },
+      get: metadata,
+      search: function (query) {
+        const needle = String(query || "").toLowerCase();
+        return (SQL_SCHEMA.tables || []).filter(function (table) {
+          const text = [table.label, table.description, table.fullName].concat((table.columns || []).map(function (column) { return column.name + " " + (column.label || ""); })).join(" ").toLowerCase();
+          return text.indexOf(needle) >= 0;
+        }).map(function (table) { return { table: table, config: metadata(table), score: 1, reason: "назва, опис або колонка" }; });
+      }
+    };
+    return window.SQL_CATALOG_UI;
+  }
   function renderCatalog() {
+    ensureCatalogUi();
     catalogRenderCount += 1;
     const root = $("#table-catalog");
+    const catalogStatus = $("#catalog-load-status");
+    if (catalogStatus) {
+      const tableCount = (SQL_SCHEMA.tables || []).length;
+      catalogStatus.textContent = tableCount
+        ? `Завантажено ${tableCount} джерел зі статичного перевіреного каталогу. Oracle-підключення виконує готовий SQL, але не змінює каталог автоматично.`
+        : "Каталог джерел не ініціалізувався. Перевірте data/physical-schema.generated.js, data/schema.js і data/catalog-ui.js.";
+      catalogStatus.classList.toggle("error", !tableCount);
+    }
     root.innerHTML = "";
     const fragment = document.createDocumentFragment();
     const query = state.catalogQuery.trim();
@@ -244,7 +288,11 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       }
       fragment.appendChild(sec);
     } else if (state.catalogMode === "core") {
-      const core = SQL_SCHEMA.tables.filter((table) => SQL_CATALOG_UI.get(table).visibility === "core");
+      let core = SQL_SCHEMA.tables.filter((table) => SQL_CATALOG_UI.get(table).visibility === "core");
+      if (!core.length && SQL_SCHEMA.tables.length) {
+        const fallbackIds = ["t6_2026_edrpou", "insured_person_info", "insured_person", "sm_packlabel", "sm_ape4_6data", "sm_ape4_5data", "pinsur_main", "pinsur_chng_doc", "pinsur_ankt_a", "pinsur_ankt_c", "pinsur_kved_hst", "pinsur_kved", "nsi_kved", "nsi_region_ukr", "mrdorg", "sk_apeq_dodatok2_data", "sk_packlabel", "sk_packlabel_extended"];
+        core = SQL_SCHEMA.tables.filter((table) => fallbackIds.indexOf(String(table.id).toLowerCase()) >= 0);
+      }
       core.sort(compareCatalogTables);
       fragment.appendChild(createCatalogSection("Основні джерела", core));
     } else {

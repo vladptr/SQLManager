@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Конструктор SQL</title>
+    <script>
+      (function () {
+        if (!Array.prototype.includes) Array.prototype.includes = function (value) { return this.indexOf(value) !== -1; };
+        if (!Array.prototype.find) Array.prototype.find = function (callback, thisArg) { for (var i = 0; i < this.length; i += 1) if (callback.call(thisArg, this[i], i, this)) return this[i]; };
+        if (!String.prototype.includes) String.prototype.includes = function (value, start) { return this.indexOf(value, start || 0) !== -1; };
+        if (!Object.assign) Object.assign = function (target) { for (var i = 1; i < arguments.length; i += 1) { var source = arguments[i] || {}; for (var key in source) if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key]; } return target; };
+        if (window.NodeList && !NodeList.prototype.forEach) NodeList.prototype.forEach = Array.prototype.forEach;
+        function installDomMethods(prototype) {
+          if (!prototype) return;
+          if (!prototype.append) prototype.append = function () { for (var i = 0; i < arguments.length; i += 1) this.appendChild(arguments[i] instanceof Node ? arguments[i] : document.createTextNode(String(arguments[i]))); };
+          if (!prototype.replaceChildren) prototype.replaceChildren = function () { while (this.firstChild) this.removeChild(this.firstChild); this.append.apply(this, arguments); };
+        }
+        installDomMethods(window.Element && Element.prototype);
+        installDomMethods(window.DocumentFragment && DocumentFragment.prototype);
+        if (window.Element && !Element.prototype.matches) Element.prototype.matches = Element.prototype.msMatchesSelector || Element.prototype.mozMatchesSelector || Element.prototype.webkitMatchesSelector;
+        if (window.Element && !Element.prototype.closest) Element.prototype.closest = function (selector) { var node = this; while (node && node.nodeType === 1) { if (node.matches(selector)) return node; node = node.parentElement; } return null; };
+      })();
+    </script>
     <style>
 :root {
   --bg0: #0f1419;
@@ -890,6 +908,17 @@ select option {
   color: var(--muted);
   font-weight: 500;
 }
+.oracle-export-card { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(42, 157, 143, 0.05); }
+.oracle-export-card h3 { margin: 0 0 8px; font-size: 1rem; }
+.oracle-health-line { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.oracle-health-dot { width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.oracle-health-dot.connected { background: var(--accent); box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.18); }
+.oracle-health-dot.error { background: #e76f51; }
+.oracle-export-status { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.oracle-export-actions { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+.oracle-export-actions label { min-width: 150px; }
+.oracle-export-actions select { width: 100%; }
+@media (max-width: 520px) { .oracle-export-actions > *, .oracle-export-actions label { width: 100%; } }
 .chosen-card {
   display: grid;
   grid-template-columns: 28px 1fr auto;
@@ -1380,10 +1409,8 @@ footer-note code,
             </div>
             <div class="selected-strip" id="selected-strip"></div>
             <div id="table-catalog"></div>
-            <p class="footer-note">
-              Немає потрібного джерела в списку? Його можна додати в
-              <code>data/schema.js</code> (поки немає підключення до БД —
-              каталог редагується вручну).
+            <p class="footer-note" id="catalog-load-status" role="status">
+              Каталог джерел завантажується…
             </p>
           </section>
 
@@ -1605,6 +1632,22 @@ footer-note code,
             </button>
           </div>
           <textarea id="sql-out" readonly spellcheck="false"></textarea>
+          <section class="oracle-export-card" aria-labelledby="oracle-export-title">
+            <h3 id="oracle-export-title">Виконання в Oracle</h3>
+            <div class="oracle-health-line">
+              <span id="oracle-health-dot" class="oracle-health-dot" aria-hidden="true"></span>
+              <span id="oracle-export-status" class="oracle-export-status" role="status" aria-live="polite">Перевіряю локальне підключення…</span>
+            </div>
+            <div class="oracle-export-actions">
+              <label>Формат
+                <select id="oracle-export-format"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option></select>
+              </label>
+              <button type="button" class="btn" id="btn-oracle-export" disabled>Виконати та завантажити</button>
+              <button type="button" class="btn danger" id="btn-oracle-cancel" disabled>Зупинити запит</button>
+              <button type="button" class="btn ghost" id="btn-oracle-health">Перевірити</button>
+            </div>
+            <p id="oracle-readonly-note" class="hint">Доступні лише безпечні запити SELECT/WITH. Portable-режим продовжує працювати без Oracle.</p>
+          </section>
         </aside>
       </div>
     </div>
@@ -3832,9 +3875,53 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#btn-next").textContent =
       state.step >= MAX_STEP ? "Оновити SQL" : "Далі";
   }
+  function ensureCatalogUi() {
+    if (window.SQL_CATALOG_UI && typeof window.SQL_CATALOG_UI.get === "function" && typeof window.SQL_CATALOG_UI.search === "function") return window.SQL_CATALOG_UI;
+    const coreNames = {
+      T6_2026_EDRPOU: true, INSURED_PERSON_INFO: true, INSURED_PERSON: true,
+      SM_PACKLABEL: true, SM_APE4_6DATA: true, SM_APE4_5DATA: true,
+      PINSUR_MAIN: true, PINSUR_CHNG_DOC: true, PINSUR_ANKT_A: true, PINSUR_ANKT_C: true,
+      PINSUR_KVED_HST: true, PINSUR_KVED: true, NSI_KVED: true, NSI_REGION_UKR: true,
+      MRDORG: true, SK_APEQ_DODATOK2_DATA: true, SK_PACKLABEL: true, SK_PACKLABEL_EXTENDED: true
+    };
+    function physicalName(table) { return String(table.name || String(table.fullName || "").split(".").pop()).toUpperCase(); }
+    function schemaName(table) { return String(table.schema || String(table.fullName || "").split(".")[0] || "WORK").toUpperCase(); }
+    function metadata(table) {
+      return {
+        visibility: coreNames[physicalName(table)] ? "core" : "advanced",
+        priority: coreNames[physicalName(table)] ? 100 : 0,
+        category: table.group || "work",
+        label: table.label || physicalName(table),
+        description: table.description || "",
+        schema: schemaName(table), grain: table.grain || "не описано", role: "факт", availability: "доступна"
+      };
+    }
+    window.SQL_CATALOG_UI = {
+      categories: [{ id: "work", label: "Доступні джерела" }],
+      categoryLabels: { work: "Доступні джерела" },
+      get: metadata,
+      search: function (query) {
+        const needle = String(query || "").toLowerCase();
+        return (SQL_SCHEMA.tables || []).filter(function (table) {
+          const text = [table.label, table.description, table.fullName].concat((table.columns || []).map(function (column) { return column.name + " " + (column.label || ""); })).join(" ").toLowerCase();
+          return text.indexOf(needle) >= 0;
+        }).map(function (table) { return { table: table, config: metadata(table), score: 1, reason: "назва, опис або колонка" }; });
+      }
+    };
+    return window.SQL_CATALOG_UI;
+  }
   function renderCatalog() {
+    ensureCatalogUi();
     catalogRenderCount += 1;
     const root = $("#table-catalog");
+    const catalogStatus = $("#catalog-load-status");
+    if (catalogStatus) {
+      const tableCount = (SQL_SCHEMA.tables || []).length;
+      catalogStatus.textContent = tableCount
+        ? `Завантажено ${tableCount} джерел зі статичного перевіреного каталогу. Oracle-підключення виконує готовий SQL, але не змінює каталог автоматично.`
+        : "Каталог джерел не ініціалізувався. Перевірте data/physical-schema.generated.js, data/schema.js і data/catalog-ui.js.";
+      catalogStatus.classList.toggle("error", !tableCount);
+    }
     root.innerHTML = "";
     const fragment = document.createDocumentFragment();
     const query = state.catalogQuery.trim();
@@ -3859,7 +3946,11 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       }
       fragment.appendChild(sec);
     } else if (state.catalogMode === "core") {
-      const core = SQL_SCHEMA.tables.filter((table) => SQL_CATALOG_UI.get(table).visibility === "core");
+      let core = SQL_SCHEMA.tables.filter((table) => SQL_CATALOG_UI.get(table).visibility === "core");
+      if (!core.length && SQL_SCHEMA.tables.length) {
+        const fallbackIds = ["t6_2026_edrpou", "insured_person_info", "insured_person", "sm_packlabel", "sm_ape4_6data", "sm_ape4_5data", "pinsur_main", "pinsur_chng_doc", "pinsur_ankt_a", "pinsur_ankt_c", "pinsur_kved_hst", "pinsur_kved", "nsi_kved", "nsi_region_ukr", "mrdorg", "sk_apeq_dodatok2_data", "sk_packlabel", "sk_packlabel_extended"];
+        core = SQL_SCHEMA.tables.filter((table) => fallbackIds.indexOf(String(table.id).toLowerCase()) >= 0);
+      }
       core.sort(compareCatalogTables);
       fragment.appendChild(createCatalogSection("Основні джерела", core));
     } else {
@@ -5285,6 +5376,124 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     }
   }
   document.addEventListener("DOMContentLoaded", init);
+})();
+
+</script>
+    <script>
+(function () {
+  "use strict";
+  var API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8787" : "";
+  var connected = false;
+  function byId(id) { return document.getElementById(id); }
+  function setStatus(message, kind) {
+    var status = byId("oracle-export-status");
+    var dot = byId("oracle-health-dot");
+    if (status) status.textContent = message;
+    if (dot) dot.className = "oracle-health-dot" + (kind ? " " + kind : "");
+  }
+  function setConnected(value) {
+    connected = value === true;
+    var button = byId("btn-oracle-export");
+    if (button && !button.dataset.busy) button.disabled = !connected;
+  }
+  function errorMessage(error) { return String(error && error.message ? error.message : error || "Невідома помилка"); }
+  function isGeneratedSqlValid() {
+    var output = byId("sql-out");
+    var status = byId("sql-status");
+    return !!(output && output.value.trim() && !(status && status.classList.contains("error")));
+  }
+  async function checkHealth() {
+    setStatus("Перевіряю локальне підключення…", "");
+    try {
+      var response = await window.fetch(API_BASE + "/api/health", { method: "GET", cache: "no-store" });
+      var data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Oracle недоступний");
+      setConnected(true);
+      setStatus("Oracle підключено: " + (data.user || "користувач") + " @ " + (data.connection || "Oracle"), "connected");
+      return data;
+    } catch (error) {
+      setConnected(false);
+      setStatus("Oracle не підключено. Запустіть start.bat на машині з доступом до Oracle.", "error");
+      return { ok: false, error: errorMessage(error) };
+    }
+  }
+  function fileName(header, format) {
+    var match = header && /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(header);
+    if (match) {
+      try { return decodeURIComponent(match[1].replace(/"/g, "")); } catch (ignore) { return match[1]; }
+    }
+    return "sqlmanager_" + new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14) + "." + format;
+  }
+  function downloadBlob(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url; link.download = name;
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+  }
+  async function exportQuery() {
+    var button = byId("btn-oracle-export");
+    var cancelButton = byId("btn-oracle-cancel");
+    var sql = (byId("sql-out") && byId("sql-out").value || "").trim();
+    var format = byId("oracle-export-format") && byId("oracle-export-format").value === "csv" ? "csv" : "xlsx";
+    if (!isGeneratedSqlValid()) {
+      setStatus("Спочатку побудуйте коректний SQL без помилок.", "error");
+      return false;
+    }
+    if (button) { button.dataset.busy = "1"; button.disabled = true; }
+    if (cancelButton) cancelButton.disabled = false;
+    setStatus("Виконую запит…", "connected");
+    try {
+      var response = await window.fetch(API_BASE + "/api/query/export", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: sql, format: format })
+      });
+      if (!response.ok) {
+        var message;
+        try { message = (await response.json()).error; } catch (ignore) { message = await response.text(); }
+        throw new Error(message || "Помилка виконання Oracle");
+      }
+      var blob = await response.blob();
+      var name = fileName(response.headers.get("Content-Disposition"), format);
+      downloadBlob(blob, name);
+      var truncated = response.headers.get("X-SQLManager-Truncated") === "true";
+      var maxRows = response.headers.get("X-SQLManager-Max-Rows") || "100000";
+      setStatus(truncated ? "Готово. Результат обмежено першими " + maxRows + " рядками: " + name : "Готово. Завантажено " + name, truncated ? "error" : "connected");
+      return true;
+    } catch (error) {
+      setStatus("Помилка Oracle: " + errorMessage(error), "error");
+      return false;
+    } finally {
+      if (button) { delete button.dataset.busy; button.disabled = !connected; }
+      if (cancelButton) cancelButton.disabled = true;
+    }
+  }
+  async function cancelQuery() {
+    var cancelButton = byId("btn-oracle-cancel");
+    if (cancelButton) cancelButton.disabled = true;
+    setStatus("Зупиняю запит…", "error");
+    try {
+      var response = await window.fetch(API_BASE + "/api/query/cancel", { method: "POST" });
+      var data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Не вдалося зупинити запит");
+      setStatus("Запит зупинено.", "error");
+      return true;
+    } catch (error) {
+      setStatus("Помилка зупинки: " + errorMessage(error), "error");
+      return false;
+    }
+  }
+  function init() {
+    var exportButton = byId("btn-oracle-export");
+    var cancelButton = byId("btn-oracle-cancel");
+    var healthButton = byId("btn-oracle-health");
+    if (exportButton) exportButton.addEventListener("click", exportQuery);
+    if (cancelButton) cancelButton.addEventListener("click", cancelQuery);
+    if (healthButton) healthButton.addEventListener("click", checkHealth);
+    checkHealth();
+  }
+  document.addEventListener("DOMContentLoaded", init);
+  window.SQLManagerOracleExport = { checkHealth: checkHealth, exportQuery: exportQuery, cancelQuery: cancelQuery, isGeneratedSqlValid: isGeneratedSqlValid };
 })();
 
 </script>

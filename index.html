@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Конструктор SQL</title>
+    <script>
+      (function () {
+        if (!Array.prototype.includes) Array.prototype.includes = function (value) { return this.indexOf(value) !== -1; };
+        if (!Array.prototype.find) Array.prototype.find = function (callback, thisArg) { for (var i = 0; i < this.length; i += 1) if (callback.call(thisArg, this[i], i, this)) return this[i]; };
+        if (!String.prototype.includes) String.prototype.includes = function (value, start) { return this.indexOf(value, start || 0) !== -1; };
+        if (!Object.assign) Object.assign = function (target) { for (var i = 1; i < arguments.length; i += 1) { var source = arguments[i] || {}; for (var key in source) if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key]; } return target; };
+        if (window.NodeList && !NodeList.prototype.forEach) NodeList.prototype.forEach = Array.prototype.forEach;
+        function installDomMethods(prototype) {
+          if (!prototype) return;
+          if (!prototype.append) prototype.append = function () { for (var i = 0; i < arguments.length; i += 1) this.appendChild(arguments[i] instanceof Node ? arguments[i] : document.createTextNode(String(arguments[i]))); };
+          if (!prototype.replaceChildren) prototype.replaceChildren = function () { while (this.firstChild) this.removeChild(this.firstChild); this.append.apply(this, arguments); };
+        }
+        installDomMethods(window.Element && Element.prototype);
+        installDomMethods(window.DocumentFragment && DocumentFragment.prototype);
+        if (window.Element && !Element.prototype.matches) Element.prototype.matches = Element.prototype.msMatchesSelector || Element.prototype.mozMatchesSelector || Element.prototype.webkitMatchesSelector;
+        if (window.Element && !Element.prototype.closest) Element.prototype.closest = function (selector) { var node = this; while (node && node.nodeType === 1) { if (node.matches(selector)) return node; node = node.parentElement; } return null; };
+      })();
+    </script>
     <link rel="stylesheet" href="css/styles.css" />
   </head>
   <body>
@@ -77,10 +95,8 @@
             </div>
             <div class="selected-strip" id="selected-strip"></div>
             <div id="table-catalog"></div>
-            <p class="footer-note">
-              Немає потрібного джерела в списку? Його можна додати в
-              <code>data/schema.js</code> (поки немає підключення до БД —
-              каталог редагується вручну).
+            <p class="footer-note" id="catalog-load-status" role="status">
+              Каталог джерел завантажується…
             </p>
           </section>
 
@@ -302,6 +318,22 @@
             </button>
           </div>
           <textarea id="sql-out" readonly spellcheck="false"></textarea>
+          <section class="oracle-export-card" aria-labelledby="oracle-export-title">
+            <h3 id="oracle-export-title">Виконання в Oracle</h3>
+            <div class="oracle-health-line">
+              <span id="oracle-health-dot" class="oracle-health-dot" aria-hidden="true"></span>
+              <span id="oracle-export-status" class="oracle-export-status" role="status" aria-live="polite">Перевіряю локальне підключення…</span>
+            </div>
+            <div class="oracle-export-actions">
+              <label>Формат
+                <select id="oracle-export-format"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option></select>
+              </label>
+              <button type="button" class="btn" id="btn-oracle-export" disabled>Виконати та завантажити</button>
+              <button type="button" class="btn danger" id="btn-oracle-cancel" disabled>Зупинити запит</button>
+              <button type="button" class="btn ghost" id="btn-oracle-health">Перевірити</button>
+            </div>
+            <p id="oracle-readonly-note" class="hint">Доступні лише безпечні запити SELECT/WITH. Portable-режим продовжує працювати без Oracle.</p>
+          </section>
         </aside>
       </div>
     </div>
@@ -341,5 +373,6 @@
     <script src="js/preset-store.js"></script>
     <script src="js/wizard-state.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/oracle-export.js"></script>
   </body>
 </html>

@@ -18,5 +18,7 @@ _temp.docx
 .env
 .env.*
 *.pem
+auth3.json
+cred/auth3.json
 # Local LLM experiment is outside SQLManager release scope
 local-llm/

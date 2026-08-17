@@ -1,0 +1,9 @@
+{
+  "db_credentials": {
+    "host": "HOST",
+    "port": 1521,
+    "service_name": "SERVICE",
+    "user": "USER",
+    "password": "PASSWORD"
+  }
+}
