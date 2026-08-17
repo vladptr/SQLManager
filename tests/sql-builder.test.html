@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="uk">
+<meta charset="utf-8">
+<title>SQL builder tests</title>
+<pre id="results">RUNNING</pre>
+<script src="../data/physical-schema.generated.js"></script>
+<script src="../data/schema.js"></script>
+<script src="../js/sql-builder.js"></script>
+<script src="../js/template-utils.js"></script>
+<script src="../js/preset-store.js"></script>
+<script src="../js/wizard-state.js"></script>
+<script src="salary-control-dataset.js"></script>
+<script>
+  const results = [];
+  function test(name, fn) {
+    try { fn(); results.push({ name, ok: true }); }
+    catch (error) { results.push({ name, ok: false, error: error.message }); }
+  }
+  function state(tables, extra = {}) {
+    return Object.assign({ tables, fields: [], filters: [], orderBy: [], mode: "select" }, extra);
+  }
+  function result(input) {
+    return SqlBuilder.build(input);
+  }
+  function includes(value, part, message = part) {
+    if (!value.includes(part)) throw new Error(`Не знайдено: ${message}\n${value}`);
+  }
+  function equal(a, b, message) {
+    if (a !== b) throw new Error(`${message || "Значення різняться"}\n${a}\n---\n${b}`);
+  }
+
+  test("порядок вибору таблиць не змінює SQL", () => {
+    const a = result(state(["t6_2026_edrpou", "insured_person_info"]));
+    const b = result(state(["insured_person_info", "t6_2026_edrpou"]));
+    equal(a.sql, b.sql);
+  });
+  test("T6 is root and person info is LEFT JOIN without RIGHT JOIN", () => {
+    const r = result(state(["insured_person_info", "t6_2026_edrpou"]));
+    equal(r.errors.length, 0);
+    includes(r.sql, "FROM vasiliuk_u.t6_2026_edrpou t6");
+    includes(r.sql, "LEFT JOIN ikis_person.insured_person_info ipi");
+    if (/\bRIGHT JOIN\b/.test(r.sql)) throw new Error("RIGHT JOIN generated");
+  });
+  test("cardinality reversal is explicit", () => {
+    equal(SqlBuilder.reverseCardinality("1:N"), "N:1");
+    equal(SqlBuilder.reverseCardinality("1:0..N"), "0..N:1");
+    equal(SqlBuilder.reverseCardinality("N:0..1"), "0..1:N");
+    equal(SqlBuilder.reverseCardinality("N:M"), "M:N");
+  });
+  test("user preset stores only constructor configuration", () => {
+    const data = {};
+    const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    const saved = SQLPresetStore.save(storage, "Звіт КВЕД", {
+      step: 5, tables: ["t6_2026_edrpou"], metrics: ["payroll"], filters: [], expandedCategories: new Set(["x"]), parallel8: true
+    });
+    equal(saved.name, "Звіт КВЕД");
+    equal(saved.state.tables[0], "t6_2026_edrpou");
+    equal(saved.state.parallel8, true);
+    if ("step" in saved.state || "expandedCategories" in saved.state) throw new Error("Transient UI state was stored");
+  });
+  test("user preset with the same name is updated instead of duplicated", () => {
+    const data = {};
+    const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    const first = SQLPresetStore.save(storage, "Мій звіт", { tables: ["t6_2026_edrpou"], metrics: ["payroll"] });
+    const second = SQLPresetStore.save(storage, "мій звіт", { tables: ["t6_2026_edrpou"], metrics: ["contributions"] });
+    equal(first.id, second.id);
+    equal(SQLPresetStore.list(storage).length, 1);
+    equal(SQLPresetStore.get(storage, first.id).state.metrics[0], "contributions");
+  });
+  test("damaged local preset storage does not break the constructor", () => {
+    const storage = { getItem: () => "{damaged", setItem: () => {} };
+    equal(SQLPresetStore.list(storage).length, 0);
+  });
+  test("user preset can be deleted", () => {
+    const data = {};
+    const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    const saved = SQLPresetStore.save(storage, "Тимчасовий", { tables: ["t6_2026_edrpou"] });
+    equal(SQLPresetStore.remove(storage, saved.id), true);
+    equal(SQLPresetStore.list(storage).length, 0);
+  });
+  test("preset v2 includes semantic contract and migrates v1", () => {
+    const snapshot = SQLPresetStore.snapshot({ tables: [], semanticMode: "all_history", allHistoryConfirmed: true, taskId: "payroll_esv", taskParameters: { year: 2026 }, qualityProfiles: ["accepted_actual_packages"] });
+    equal(snapshot.schemaVersion, 2); equal(snapshot.semanticMode, "all_history"); equal(snapshot.allHistoryConfirmed, true);
+    const migrated = SQLPresetStore.migrate({ id: "old", name: "old", state: { tables: [] } });
+    equal(migrated.state.schemaVersion, 2); equal(migrated.state.semanticMode, "all_history"); equal(migrated.state.allHistoryConfirmed, false);
+    const current = SQLPresetStore.migrate({ id: "old-current", name: "old-current", state: { presets: ["current_insurer_profile"] } });
+    equal(current.state.semanticMode, "current");
+  });
+  test("preset JSON export and import validates schema version", () => {
+    const data = {}; const storage = { getItem: key => data[key] || null, setItem: (key, value) => { data[key] = value; } };
+    SQLPresetStore.save(storage, "A", { tables: ["t6_2026_edrpou"], semanticMode: "current" });
+    const json = SQLPresetStore.exportJson(storage);
+    equal(SQLPresetStore.importJson(storage, json, () => true), 1);
+    let rejected = false; try { SQLPresetStore.importJson(storage, '{"schemaVersion":1,"presets":[]}'); } catch (_) { rejected = true; }
+    if (!rejected) throw new Error("Incompatible preset import accepted");
+  });
+  test("wizard preview hides later-step settings without deleting them", () => {
+    const full = {
+      tables: ["t6_2026_edrpou"], joins: [{ id: "override" }],
+      fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }],
+      metrics: ["payroll"], filters: [{ table: "t6_2026_edrpou", column: "year", op: "=", value: 2026 }],
+      orderBy: [{ fieldIndex: 0, dir: "ASC" }], presets: ["current_insurer_profile"],
+      parallel8: true, mode: "ctas", targetTable: "REPORT_1"
+    };
+    const sources = SQLWizardState.forStep(full, 1);
+    equal(sources.fields.length, 0);
+    equal(sources.filters.length, 0);
+    equal(sources.orderBy.length, 0);
+    equal(sources.mode, "select");
+    equal(full.fields.length, 1, "Full state fields must survive back navigation");
+    equal(full.filters.length, 1, "Full state filters must survive back navigation");
+    const filters = SQLWizardState.forStep(full, 4);
+    equal(filters.fields.length, 1);
+    equal(filters.filters.length, 1);
+    equal(filters.orderBy.length, 1);
+  });
+  test("три таблиці з проміжним зв’язком", () => {
+    const r = result(state(["pinsur_ankt_a", "pinsur_main", "pinsur_chng_doc"]));
+    equal(r.errors.length, 0);
+    equal((r.sql.match(/\bJOIN\b/g) || []).length, 2);
+  });
+  test("непов’язаний граф повертає помилку без SQL", () => {
+    const graph = SqlBuilder.resolveJoinGraph(["insured_person", "mrdorg"], [], []);
+    if (!graph.errors.length) throw new Error("Очікувалася помилка непов’язаного графа");
+  });
+  test("складений JOIN APE46–APE45", () => {
+    const r = result(state(["sm_ape4_6data", "sm_ape4_5data"]));
+    includes(r.sql, "aped46_slb"); includes(r.sql, "aped45_slb");
+    includes(r.sql, "aped46_numident"); includes(r.sql, "aped45_numident");
+  });
+  test("альтернативний JOIN особи використовує РНОКПП або паспортний ключ", () => {
+    const joins = SqlBuilder.suggestJoinsForTables(["t6_2026_edrpou", "insured_person_info"]);
+    joins[0].selectedVariant = "numident_or_passport";
+    const r = result(state(["t6_2026_edrpou", "insured_person_info"], { joins }));
+    includes(r.sql, "latest_person_identity");
+    includes(r.sql, "sqlm_match_key");
+    includes(r.sql, "'БК' || UPPER(TRIM(ipi_src.pass_serial))");
+    includes(r.sql, "'П' || TRIM(ipi_src.pass_number)");
+  });
+  test("COUNT DISTINCT осіб", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["people_count"] }));
+    includes(r.sql, "COUNT(DISTINCT t6.kod_zo)");
+  });
+  test("сторнування фонду оплати", () => {
+    const r = result(state(["sm_packlabel", "sm_ape4_6data"], { metrics: ["raw_payroll"] }));
+    includes(r.sql, "IN (3, 5, 7, 9, 12)"); includes(r.sql, "-ABS(pd.aped46_sum)");
+  });
+  test("DATE-фільтр перевіряється і форматується", () => {
+    const good = result(state(["insured_person_info"], { filters: [{ table: "insured_person_info", column: "birth_dt", op: ">=", value: "2026-01-31" }] }));
+    includes(good.sql, "DATE '2026-01-31'");
+    const bad = result(state(["insured_person_info"], { filters: [{ table: "insured_person_info", column: "birth_dt", op: "=", value: "31.01.2026" }] }));
+    if (!bad.errors.length) throw new Error("Некоректна дата не відхилена");
+  });
+  test("LIKE без регістру застосовує UPPER з обох боків", () => {
+    const r = result(state(["insured_person_info"], { filters: [{ table: "insured_person_info", column: "ln_name", op: "LIKE_UPPER", value: "Іван" }] }));
+    includes(r.sql, "UPPER(ipi.ln_name) LIKE UPPER('%Іван%')");
+  });
+  test("CTAS відхиляє дубльовані технічні аліаси", () => {
+    const fields = [
+      { table: "insured_person_info", column: "ln_name", outAlias: "name" },
+      { table: "insured_person_info", column: "fn_name", outAlias: "NAME" }
+    ];
+    const r = result(state(["insured_person_info"], { mode: "ctas", targetTable: "work_result", fields }));
+    if (!r.errors.length) throw new Error("Дубльовані аліаси не відхилені");
+  });
+  test("шаблон підставляє період і OTK для T6", () => {
+    const sql = TemplateUtils.apply(
+      "year between {{YEAR_START}} and {{YEAR_END}} month between {{MONTH_START}} and {{MONTH_END}} {{APED46_OTK_CONDITION}}",
+      { yearStart: 2026, yearEnd: 2022, monthStart: 12, monthEnd: 3, otk: "1" }
+    );
+    includes(sql, "year between 2022 and 2026");
+    includes(sql, "month between 03 and 12");
+    includes(sql, "AND pd.aped46_otk = 1");
+  });
+  test("OTK не додається до шаблону для значення будь-яке", () => {
+    const sql = TemplateUtils.apply("x {{APED46_OTK_CONDITION}} y", { otk: "any" });
+    if (sql.includes("aped46_otk")) throw new Error("OTK не мав додаватися");
+  });
+  test("bridge: пакет до анкети A проходить через страхувальника і документ", () => {
+    const r = result(state(["sm_packlabel", "pinsur_ankt_a"]));
+    equal(r.errors.length, 0); equal((r.sql.match(/\bJOIN\b/g) || []).length, 3);
+    includes(r.sql, "ikis_ersp.pinsur_main"); includes(r.sql, "ikis_ersp.pinsur_chng_doc");
+  });
+  test("bridge: T6 до КВЕД проходить правильний повний маршрут", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    ["pinsur_main", "pinsur_chng_doc", "pinsur_kved_hst", "pinsur_kved"].forEach((id) => {
+      if (!r.graph.bridgeTables.includes(id)) throw new Error(`Немає bridge ${id}`);
+    });
+    includes(r.sql, "t6.slb_im = im.im_id"); includes(r.sql, "im.im_id = ih.ih_im");
+    includes(r.sql, "ih.ih_ivh = ivh.ivh_id"); includes(r.sql, "ivh.ivh_id = kv.iv_ivh"); includes(r.sql, "kv.iv_kvd = k.kvd_id");
+    if (/JOIN ikis_ersp\.pinsur_kved kv\s+ON ih\./.test(r.sql)) throw new Error("Знайдено заборонене скорочення документ → КВЕД");
+  });
+  test("bridge: анкета C до КВЕД проходить через документ і pinsur_kved", () => {
+    const r = result(state(["pinsur_ankt_c", "nsi_kved"]));
+    includes(r.sql, "ikis_ersp.pinsur_chng_doc"); includes(r.sql, "ikis_ersp.pinsur_kved_hst"); includes(r.sql, "ikis_ersp.pinsur_kved");
+  });
+  test("немає вигаданого прямого pinsur_main до nsi_kved", () => {
+    const r = result(state(["pinsur_main", "nsi_kved"]));
+    if (/im\.[^\n]+\s*=\s*k\./.test(r.sql)) throw new Error("Знайдено прямий JOIN");
+    equal((r.sql.match(/\bJOIN\b/g) || []).length, 4);
+  });
+  test("анкета C при маршруті від страхувальника є LEFT JOIN", () => {
+    const r = result(state(["pinsur_main", "pinsur_ankt_c"]));
+    includes(r.sql, "LEFT JOIN ikis_ersp.pinsur_ankt_c iac");
+  });
+  test("bridge SQL стабільний при зворотному порядку endpoints", () => {
+    const a = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    const b = result(state(["nsi_kved", "t6_2026_edrpou"]));
+    equal(a.sql, b.sql);
+  });
+  test("bridge-поля не потрапляють у SELECT автоматично", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    const select = r.sql.slice(0, r.sql.indexOf("FROM"));
+    includes(select, "t6.*"); includes(select, "k.*");
+    if (/\b(im|ih|ivh|kv)\.\*/.test(select)) throw new Error("Bridge-поля потрапили у SELECT");
+  });
+  test("кожна таблиця маршруту з’являється у FROM/JOIN один раз", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    ["vasiliuk_u.t6_2026_edrpou", "ikis_ersp.pinsur_main", "ikis_ersp.pinsur_chng_doc", "ikis_ersp.pinsur_kved_hst", "ikis_ersp.pinsur_kved", "ikis_ndi.nsi_kved"].forEach((name) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      equal((r.sql.match(new RegExp(`(?:FROM|JOIN)\\s+${escaped}\\s`, "g")) || []).length, 1, `Дубльовано ${name}`);
+    });
+  });
+  test("preset актуального профілю додає три семантичні фільтри", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], { presets: ["current_insurer_profile"] }));
+    includes(r.sql, "im.im_st IN ('A', 'L')"); includes(r.sql, "ih.ih_st_actual = 'A'"); includes(r.sql, "kv.iv_tp = 'Y'");
+  });
+  test("без preset фільтри актуального профілю відсутні", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    ["im.im_st IN", "ih.ih_st_actual", "kv.iv_tp = 'Y'"].forEach((part) => { if (r.sql.includes(part)) throw new Error(`Зайвий фільтр ${part}`); });
+  });
+  test("history route не змішується з current pointer", () => {
+    const r = result(state(["pinsur_main", "pinsur_chng_doc"]));
+    includes(r.sql, "im.im_id = ih.ih_im");
+    if (r.sql.includes("im.im_ih = ih.ih_id")) throw new Error("Маршрути змішані");
+  });
+  test("ланцюг 1:N до КВЕД попереджає про розмноження сум", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"]));
+    const item = (r.diagnostics || []).find((diagnostic) => diagnostic.code === "FANOUT_RISK");
+    if (!item || item.severity !== "warning" || !item.action) throw new Error("Немає структурованої FANOUT_RISK діагностики");
+  });
+  test("all_history requires explicit fanout confirmation", () => {
+    const blocked = result(state(["pinsur_main"], { semanticMode: "all_history" }));
+    if (!blocked.errors.length) throw new Error("all_history accepted without confirmation");
+    const accepted = result(state(["pinsur_main"], { semanticMode: "all_history", allHistoryConfirmed: true }));
+    equal(accepted.errors.length, 0);
+  });
+  test("quality profile system filters are explicit", () => {
+    const plain = result(state(["sm_packlabel", "sm_ape4_6data"]));
+    if (plain.sql.includes("plb.slb_fixed = 'Y'")) throw new Error("Hidden system filter applied");
+    const filtered = result(state(["sm_packlabel", "sm_ape4_6data"], { qualityProfiles: ["accepted_actual_packages"] }));
+    includes(filtered.sql, "plb.slb_fixed = 'Y'"); includes(filtered.sql, "pd.aped46_st = 'O'");
+    if (!(filtered.appliedPredicates || []).length) throw new Error("Applied predicates are not exposed");
+  });
+  test("external FK remains catalogued but is unavailable to routing", () => {
+    const external = SQL_SCHEMA.physicalJoins.find((edge) => edge.unresolvedExternal);
+    if (!external || !external.externalTarget || external.isDefault !== false) throw new Error("External FK metadata is incomplete");
+    if (SqlBuilder.normalizedEdges({}).some((edge) => edge.id === external.id)) throw new Error("External FK entered routing graph");
+  });
+  test("all routable catalog edges build without RIGHT JOIN", () => {
+    const pairs = new Set(SqlBuilder.normalizedEdges({}).filter((edge) => edge.isDefault).map((edge) => [edge.left, edge.right].sort().join("|")));
+    pairs.forEach((key) => {
+      const ids = key.split("|"); let r;
+      try { r = result(state(ids)); } catch (error) { throw new Error(`${key}: ${error.message}`); }
+      if (!r.errors.length && /\bRIGHT JOIN\b/.test(r.sql)) throw new Error(`RIGHT JOIN: ${key}`);
+    });
+  });
+
+  test("DDL: APE 4-5 data приєднується до заголовка за пакетом і сторінкою", () => {
+    const r = result(state(["sm_ape4_5data", "sm_ape4_5"]));
+    includes(r.sql, "a45.ape45_slb = d5.aped45_slb");
+    includes(r.sql, "a45.ape45_page = d5.aped45_page");
+  });
+  test("DDL: APE 4-6 data приєднується до заголовка за пакетом і сторінкою", () => {
+    const r = result(state(["sm_ape4_6data", "sm_ape4_6"]));
+    includes(r.sql, "pd.aped46_slb = a46.ape46_slb");
+    includes(r.sql, "pd.aped46_page = a46.ape46_page");
+  });
+  test("маршрут усіх версій КВЕД доступний лише як явний override", () => {
+    const normal = result(state(["pinsur_main", "nsi_kved"]));
+    includes(normal.sql, "im.im_id = ih.ih_im");
+    const explicit = result(state(["pinsur_main", "nsi_kved"], {
+      joins: [{ id: "insurer_to_all_kved_versions", isDefault: true, weight: 1 }]
+    }));
+    includes(explicit.sql, "im.im_id = ivh.ivh_im");
+    if (explicit.sql.includes("ikis_ersp.pinsur_chng_doc")) throw new Error("Явний маршрут усіх версій не повинен додавати документ змін");
+  });
+
+  test("людина та підприємство зв’язуються через кадрові події APE 4-5 і пакет", () => {
+    const fields = [
+      { table: "insured_person_info", column: "numident" },
+      { table: "sm_ape4_5data", column: "aped45_date_hire" },
+      { table: "sm_ape4_5data", column: "aped45_date_fire" },
+      { table: "sm_ape4_5data", column: "aped45_position" },
+      { table: "pinsur_main", column: "im_id" }
+    ];
+    const r = result(state(["insured_person_info", "sm_ape4_5data", "pinsur_main"], { fields }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "ipi.numident = d5.aped45_numident");
+    includes(r.sql, "d5.aped45_slb = plb.slb_id");
+    includes(r.sql, "plb.slb_im = im.im_id");
+    includes(r.sql, "d5.aped45_date_hire");
+    includes(r.sql, "d5.aped45_date_fire");
+    includes(r.sql, "d5.aped45_position");
+    if (r.sql.includes("t6_2026_edrpou")) throw new Error("Для явно вибраного APE 4-5 не потрібна bridge-таблиця T6");
+    if (!r.warnings.some((warning) => /кадрових подій/.test(warning))) throw new Error("Немає попередження про множинні кадрові події");
+  });
+  test("маршрут людина–APE 4-5–підприємство не залежить від порядку вибору", () => {
+    const a = result(state(["insured_person_info", "sm_ape4_5data", "pinsur_main"]));
+    const b = result(state(["pinsur_main", "sm_ape4_5data", "insured_person_info"]));
+    equal(a.sql, b.sql);
+  });
+
+  test("за замовчуванням приєднуються всі картки особи без latest CTE", () => {
+    const r = result(state(["t6_2026_edrpou", "insured_person_info"]));
+    includes(r.sql, "ikis_person.insured_person_info ipi");
+    if (r.sql.includes("latest_person_info") || r.sql.includes("sqlm_rn = 1")) throw new Error("Неявно застосовано лише останню картку");
+  });
+  test("фільтр останньої картки явно додає ROW_NUMBER для T6", () => {
+    const r = result(state(["t6_2026_edrpou", "insured_person_info"], { latestPersonOnly: true }));
+    includes(r.sql, "latest_person_info AS");
+    includes(r.sql, "ROW_NUMBER() OVER (PARTITION BY numident ORDER BY modify_dt DESC NULLS LAST, ip_id DESC)");
+    includes(r.sql, "WHERE sqlm_rn = 1");
+  });
+  test("фільтр останньої картки однаково працює для APE 4-5", () => {
+    const all = result(state(["insured_person_info", "sm_ape4_5data"]));
+    if (all.sql.includes("latest_person_info")) throw new Error("APE 4-5 не має дедуплікувати картки за замовчуванням");
+    const latest = result(state(["insured_person_info", "sm_ape4_5data"], { latestPersonOnly: true }));
+    includes(latest.sql, "latest_person_info AS");
+    includes(latest.sql, "FROM latest_person_info ipi");
+  });
+
+  test("робоча T6 приєднується до APE 4-5 без insured_person_info", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"]));
+    includes(r.sql, "ape45_employment_with_period AS");
+    includes(r.sql, "t6.slb_im = d5.sqlm_slb_im");
+    includes(r.sql, "t6.kod_zo = d5.aped45_numident");
+    if (r.sql.includes("t6.year = d5.sqlm_year") || r.sql.includes("t6.aped46_mnth = d5.sqlm_month")) throw new Error("Стандартний маршрут має повертати всі посади, а не лише посади за місяць T6");
+    if (r.sql.includes("insured_person_info") || r.sql.includes("latest_person_info")) throw new Error("Зайва картка особи у маршруті T6 → APE 4-5");
+  });
+  test("для T6 → APE 4-5 можна явно обмежити посади тим самим місяцем", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "positions_in_same_month" }]
+    }));
+    includes(r.sql, "t6.year = d5.sqlm_year");
+    includes(r.sql, "t6.aped46_mnth = d5.sqlm_month");
+  });
+  test("фільтр останньої картки не додає людину до T6 → APE 4-5", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], { latestPersonOnly: true }));
+    if (r.sql.includes("insured_person_info") || r.sql.includes("latest_person_info")) throw new Error("Фільтр не повинен додавати невибрану таблицю особи");
+  });
+
+  test("можна вибрати останню відому посаду людини у страхувальника", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "latest_position_at_insurer" }]
+    }));
+    includes(r.sql, "ape45_latest_position_by_insurer AS");
+    includes(r.sql, "PARTITION BY plb_src.slb_im, d5_src.aped45_numident");
+    includes(r.sql, "ORDER BY d5_src.aped45_date_hire DESC NULLS LAST");
+    includes(r.sql, "WHERE sqlm_position_rn = 1");
+  });
+  test("можна вибрати останню посаду станом на місяць T6", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "position_as_of_t6_month" }]
+    }));
+    includes(r.sql, "ape45_position_as_of_t6_month AS");
+    includes(r.sql, "<= (t6_src.year * 100 + t6_src.aped46_mnth)");
+    includes(r.sql, "d5_src.aped45_date_hire <= LAST_DAY");
+    includes(r.sql, "t6.kat_zo = d5.sqlm_t6_kat_zo");
+    includes(r.sql, "WHERE sqlm_position_rn = 1");
+  });
+  test("Oracle hint PARALLEL(8) додається лише за галочкою", () => {
+    const normal = result(state(["t6_2026_edrpou"]));
+    if (normal.sql.includes("PARALLEL(8)")) throw new Error("Hint додано без галочки");
+    const parallel = result(state(["t6_2026_edrpou"], { parallel8: true }));
+    includes(parallel.sql, "SELECT /*+ PARALLEL(8) */");
+  });
+
+  test("готовий фільтр військових використовує точний список kat_zo", () => {
+    const value = "31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74";
+    const r = result(state(["t6_2026_edrpou"], { filters: [{ table: "t6_2026_edrpou", column: "kat_zo", op: "IN", value }] }));
+    includes(r.sql, "t6.kat_zo IN (31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74)");
+  });
+  test("готовий фільтр цивільних підтримує NOT IN для аналога APED46_ZO", () => {
+    const value = "31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74";
+    const r = result(state(["sm_ape4_6data"], { filters: [{ table: "sm_ape4_6data", column: "aped46_zo", op: "NOT IN", value }] }));
+    includes(r.sql, "pd.aped46_zo NOT IN (31, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 67, 68, 73, 74)");
+  });
+  test("готовий фільтр осіб з інвалідністю використовує точний список категорій", () => {
+    const value = "2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80";
+    const r = result(state(["t6_2026_edrpou"], { filters: [{ table: "t6_2026_edrpou", column: "kat_zo", op: "IN", value }] }));
+    includes(r.sql, "t6.kat_zo IN (2, 28, 30, 32, 36, 39, 41, 49, 45, 66, 78, 79, 80)");
+  });
+
+  test("DDL catalog has exact totals", () => {
+    equal(SQL_SCHEMA.physicalCatalog.tables.length, 289, "DDL tables");
+    equal(SQL_SCHEMA.physicalCatalog.tables.reduce((sum, table) => sum + table.columns.length, 0), 3481, "DDL columns");
+    equal(SQL_SCHEMA.physicalCatalog.tables.filter(table => table.primaryKey).length, 255, "DDL PK");
+    equal(SQL_SCHEMA.physicalCatalog.joins.length, 499, "unique DDL FK");
+  });
+  test("DDL composite FK keeps every condition", () => {
+    const edge = SQL_SCHEMA.physicalJoins.find(item => item.constraintName === "FK_APE4_5DATA");
+    equal(edge.conditions.length, 2, "APE45 composite FK");
+  });
+  test("DDL cross-schema FK is recognized", () => {
+    const edge = SQL_SCHEMA.physicalJoins.find(item => item.constraintName === "SM_PKLBP_FK_SLB_IM");
+    equal(edge.left, "sm_packlabel");
+    equal(edge.right, "pinsur_main");
+    equal(edge.unresolvedExternal, false);
+  });
+  test("DDL absent schema FK is unresolvedExternal", () => {
+    if (!SQL_SCHEMA.physicalJoins.some(item => item.unresolvedExternal)) throw new Error("No unresolved external FK");
+  });
+  test("manual semantic edge wins over physical shortcut", () => {
+    const manual = SQL_SCHEMA.joins.find(item => item.id === "pack_to_insurer");
+    equal(manual.isDefault, true);
+    const physical = SQL_SCHEMA.physicalJoins.find(item => item.constraintName === "SM_PKLBP_FK_SLB_IM");
+    equal(physical.isDefault, false);
+  });
+  test("salary month uses person grain and weighted denominator", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_salary_month"], salaryGrain: "person_month", salaryPopulationRule: "reported" }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_employer_month AS");
+    includes(r.sql, "person_month AS");
+    includes(r.sql, "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)");
+    includes(r.sql, "GROUP BY\n       t6.year,\n       t6.aped46_mnth");
+    if (r.sql.includes("AVG(")) throw new Error("AVG of rows is forbidden");
+    if (r.sql.includes("SELECT DISTINCT")) throw new Error("DISTINCT must not hide grain errors");
+  });
+  test("salary period uses person-months, not average of averages", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_month" }));
+    includes(r.sql, "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)");
+    if (r.sql.includes("AVG(avg_salary_month)")) throw new Error("Unweighted average used");
+  });
+  test("median monthly salary uses Oracle MEDIAN after monthly grain", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["median_monthly_salary_period"], salaryGrain: "person_month" }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_month AS");
+    includes(r.sql, 'MEDIAN(t6.salary_month) AS "median_monthly_salary_period"');
+    if (r.sql.includes("MEDIAN(t6_src.sum_narah)")) throw new Error("Median was calculated from raw T6 rows");
+  });
+  test("median salary supports employer grain and report dimensions", () => {
+    const r = result(state(["t6_2026_edrpou"], {
+      metrics: ["median_monthly_salary_period"],
+      salaryGrain: "person_employer_month",
+      fields: [
+        { table: "t6_2026_edrpou", column: "reg", agg: "" },
+        { table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }
+      ]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "FROM person_employer_month");
+    includes(r.sql, "MEDIAN(t6.salary_month)");
+    includes(r.sql, "GROUP BY\n       t6.reg,\n       t6.aped46_mnth");
+  });
+  test("salary report appends ORDER BY for selected dimensions", () => {
+    const fields = [
+      { table: "t6_2026_edrpou", column: "reg", agg: "" },
+      { table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }
+    ];
+    const r = result(state(["t6_2026_edrpou"], {
+      fields,
+      metrics: ["payroll", "avg_monthly_salary_period"],
+      salaryGrain: "person_employer_month",
+      orderBy: [{ fieldIndex: 0, dir: "ASC" }, { fieldIndex: 1, dir: "DESC" }]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "ORDER BY t6.reg ASC, t6.aped46_mnth DESC");
+  });
+  test("positive salary rule is applied after monthly aggregation", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryPopulationRule: "positive_salary" }));
+    includes(r.sql, "WHERE salary_month > 0");
+  });
+  test("two employers have explicit alternative denominators", () => {
+    const person = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_month" }));
+    const jobs = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month" }));
+    includes(person.sql, "FROM person_month");
+    includes(jobs.sql, "FROM person_employer_month");
+  });
+  test("annual salary rejects an incomplete year", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_salary"], filters: [{ table: "t6_2026_edrpou", column: "aped46_mnth", op: "BETWEEN", value: "1,6" }] }));
+    if (!r.errors.length) throw new Error("Incomplete year accepted");
+  });
+  test("annual income uses person-year", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"] }));
+    includes(r.sql, "person_year AS");
+    includes(r.sql, 't6.year AS "year"');
+    includes(r.sql, "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)");
+  });
+  test("annual income rejects payroll companion", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person", "payroll"] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income + payroll was not blocked");
+  });
+  test("annual income rejects contributions companion", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person", "contributions"] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income + contributions was not blocked");
+  });
+  test("annual income rejects insurer count companion", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person", "insurers_count"], salaryGrain: "person_employer_month" }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income + insurer count was not blocked");
+  });
+  test("annual income rejects KVED breakdown", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], { metrics: ["avg_annual_income_per_person"], salaryGrain: "person_employer_month", presets: ["current_insurer_profile"], fields: [{ table: "nsi_kved", column: "kvd_code", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by KVED was not blocked");
+  });
+  test("annual income rejects employer breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "slb_im", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by employer was not blocked");
+  });
+  test("annual income rejects region breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by region was not blocked");
+  });
+  test("annual income rejects month breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by month was not blocked");
+  });
+  test("annual income rejects EDRPOU breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "edrpou", agg: "" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income by EDRPOU was not blocked");
+  });
+  test("annual income rejects direct region ordering", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], orderBy: [{ table: "t6_2026_edrpou", column: "reg", dir: "ASC" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income ORDER BY region was not blocked");
+  });
+  test("annual income rejects direct month ordering", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], orderBy: [{ table: "t6_2026_edrpou", column: "aped46_mnth", dir: "ASC" }] }));
+    if (!r.errors.length || r.sql) throw new Error("Annual income ORDER BY month was not blocked");
+  });
+  test("annual income allows person identifier breakdown", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "kod_zo", agg: "" }] }));
+    equal(r.errors.length, 0); includes(r.sql, "person_year AS"); includes(r.sql, "t6.kod_zo");
+  });
+  test("annual income allows sex breakdown through person-year", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "sex", agg: "" }] }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "SELECT year, kod_zo, sex, SUM(salary_month) AS salary_year");
+    includes(r.sql, "GROUP BY year, kod_zo, sex");
+    includes(r.sql, "t6.sex AS");
+  });
+  test("annual income allows age calculated at year end", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "age", agg: "" }] }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_year_age AS");
+    includes(r.sql, "TRUNC(MONTHS_BETWEEN(TO_DATE('31.12.' || year, 'DD.MM.YYYY'), birth_dt) / 12) AS age");
+    includes(r.sql, "t6.age AS");
+  });
+  test("annual income allows age-group breakdown through birth date", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_annual_income_per_person"], fields: [{ table: "t6_2026_edrpou", column: "age_group", agg: "" }] }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "person_year_age AS");
+    includes(r.sql, "TO_DATE('31.12.' || year, 'DD.MM.YYYY')");
+    includes(r.sql, "WHEN age BETWEEN 20 AND 24 THEN '20-24'");
+    includes(r.sql, "WHEN age >= 65 THEN '65+'");
+    includes(r.sql, "WHEN age IS NULL THEN NULL");
+    includes(r.sql, "t6.age_group AS");
+  });
+  test("annual income allows sex and age-group with person count", () => {
+    const r = result(state(["t6_2026_edrpou"], {
+      metrics: ["avg_annual_income_per_person", "people_count"],
+      fields: [
+        { table: "t6_2026_edrpou", column: "sex", agg: "" },
+        { table: "t6_2026_edrpou", column: "age_group", agg: "" }
+      ]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, "GROUP BY year, kod_zo, sex, birth_dt");
+    includes(r.sql, 'COUNT(*) AS "people_count"');
+    includes(r.sql, "t6.sex AS");
+    includes(r.sql, "t6.age_group AS");
+  });
+  test("salary by KVED aggregates before dictionary joins", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], {
+      metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month",
+      presets: ["current_insurer_profile"], fields: [{ table: "nsi_kved", column: "kvd_code", agg: "" }]
+    }));
+    equal(r.errors.length, 0);
+    if (r.sql.indexOf("person_employer_month AS") > r.sql.indexOf("JOIN ikis_ndi.nsi_kved")) throw new Error("Dictionary joined before grain CTE");
+    includes(r.sql, "ih.ih_st_actual = 'A'");
+    includes(r.sql, "kv.iv_tp = 'Y'");
+  });
+  test("monthly report combines payroll, ESV and average salary by KVED region and month", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], {
+      metrics: ["payroll", "contributions", "avg_monthly_salary_period"],
+      salaryGrain: "person_employer_month",
+      presets: ["current_insurer_profile"],
+      fields: [
+        { table: "t6_2026_edrpou", column: "reg", agg: "" },
+        { table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" },
+        { table: "nsi_kved", column: "kvd_code", agg: "" }
+      ]
+    }));
+    equal(r.errors.length, 0);
+    includes(r.sql, 'SUM(t6.salary_month) AS "payroll_sum"');
+    includes(r.sql, 'SUM(t6.esv_month) AS "esv_sum"');
+    includes(r.sql, 'SUM(t6.salary_month) / NULLIF(COUNT(*), 0) AS "avg_monthly_salary_period"');
+    includes(r.sql, "t6.reg");
+    includes(r.sql, "t6.aped46_mnth");
+    includes(r.sql, "k.kvd_code");
+    if (r.sql.indexOf("person_employer_month AS") > r.sql.indexOf("JOIN ikis_ndi.nsi_kved")) throw new Error("Additive metrics joined before safe grain");
+  });
+  test("salary with KVED history is blocked without semantic mode", () => {
+    const r = result(state(["t6_2026_edrpou", "nsi_kved"], { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month" }));
+    if (!r.errors.length) throw new Error("Unsafe historical KVED was accepted");
+  });
+  test("physical catalog contains no duplicate full names or FK ids", () => {
+    equal(new Set(SQL_SCHEMA.physicalCatalog.tables.map(table => table.fullName)).size, 289);
+    equal(new Set(SQL_SCHEMA.physicalCatalog.joins.map(edge => edge.id)).size, 499);
+  });
+  test("DDL per-file counts match source", () => {
+    const websm = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_4.sql");
+    const ersp = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_5.sql");
+    const ndi = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_6.sql");
+    const personAndKatottg = SQL_SCHEMA.physicalCatalog.stats.find(item => item.sourceFile === "rzo_schema_7.sql");
+    equal(`${websm.tables}/${websm.columns}/${websm.primaryKeys}/${websm.foreignKeys}`, "112/1752/89/226");
+    equal(`${ersp.tables}/${ersp.columns}/${ersp.primaryKeys}/${ersp.foreignKeys}`, "88/809/81/135");
+    equal(`${ndi.tables}/${ndi.columns}/${ndi.primaryKeys}/${ndi.foreignKeys}`, "59/576/56/61");
+    equal(`${personAndKatottg.tables}/${personAndKatottg.columns}/${personAndKatottg.primaryKeys}/${personAndKatottg.foreignKeys}`, "30/344/29/102");
+  });
+  test("DDL 6/7 resolve insurer, KVED, region and person physical links", () => {
+    const ids = new Set(SQL_SCHEMA.physicalJoins.filter(edge => !edge.unresolvedExternal).map(edge => edge.id));
+    [
+      "fk:ikis_ersp.pinsur_ankt_a:fk_ian_ic",
+      "fk:ikis_ersp.pinsur_ankt_c:fk_iac_ru",
+      "fk:ikis_ersp.pinsur_kved:fk_iv_kvd",
+      "fk:ikis_websm.sm_ape4_5data:fk_ape45_pel",
+      "fk:ikis_websm.sm_ape4_6data:fk_ape46_pel"
+    ].forEach(id => { if (!ids.has(id)) throw new Error(`Missing resolved FK: ${id}`); });
+  });
+  test("KATOTTG hierarchy and ZO category are imported from DDL 7", () => {
+    const katottg = SQL_SCHEMA.tables.find(table => table.fullName.toUpperCase() === "IKIS_NDI.NDI_KATOTTG");
+    const zo = SQL_SCHEMA.tables.find(table => table.fullName.toUpperCase() === "IKIS_NDI.NSI_ZO_CAT");
+    if (!katottg || !zo) throw new Error("DDL 7 dictionaries missing");
+    equal(katottg.foreignKeys.filter(fk => fk.referencedTable === "IKIS_NDI.NDI_KATOTTG").length, 5);
+    equal(zo.primaryKey.columns.join(","), "ZO_ID");
+  });
+  test("salary denominator cannot divide by zero", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"] }));
+    includes(r.sql, "NULLIF(COUNT(*), 0)");
+  });
+  test("raw rows are grouped before person-month count", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"] }));
+    includes(r.sql, "GROUP BY t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou");
+    includes(r.sql, "GROUP BY year, aped46_mnth, kod_zo");
+  });
+  test("salary SQL is stable when source selection order changes", () => {
+    const extra = { metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month", presets: ["current_insurer_profile"] };
+    const a = result(state(["t6_2026_edrpou", "nsi_kved"], extra));
+    const b = result(state(["nsi_kved", "t6_2026_edrpou"], extra));
+    equal(a.sql, b.sql);
+  });
+  test("salary can combine three T6 years with UNION ALL", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_monthly_salary_period"], t6Years: [2024, 2025, 2026] }));
+    equal(r.errors.length, 0); includes(r.sql, "t6_selected_years AS");
+    includes(r.sql, "FROM vasiliuk_u.t6_2024_edrpou"); includes(r.sql, "FROM vasiliuk_u.t6_2025_edrpou"); includes(r.sql, "FROM vasiliuk_u.t6_2026_edrpou");
+    if ((r.sql.match(/UNION ALL/g) || []).length !== 2) throw new Error("Expected two UNION ALL operators");
+    includes(r.sql, "FROM t6_selected_years t6_src");
+  });
+  test("T6 month and region parameters filter every selected year before UNION", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["payroll"], t6Years: [2024, 2026], t6MonthFrom: 5, t6MonthTo: 5, t6Region: "5" }));
+    equal(r.errors.length, 0); includes(r.sql, "t6_selected_years AS");
+    if ((r.sql.match(/aped46_mnth BETWEEN 5 AND 5/g) || []).length !== 2) throw new Error("Month predicate is not applied to every T6 year");
+    if ((r.sql.match(/reg = '5'/g) || []).length !== 2) throw new Error("Region predicate is not applied to every T6 year");
+  });
+  test("derived age group is calculated for a regular multi-year aggregate", () => {
+    const r = result(state(["t6_2026_edrpou"], {
+      metrics: ["payroll", "contributions", "people_count"],
+      fields: [
+        { table: "t6_2026_edrpou", column: "reg", agg: "" },
+        { table: "t6_2026_edrpou", column: "age_group", agg: "" },
+        { table: "t6_2026_edrpou", column: "sex", agg: "" }
+      ],
+      t6Years: [2024, 2025, 2026], t6MonthFrom: 12, t6MonthTo: 12
+    }));
+    equal(r.errors.length, 0);
+    if (/\bt6\.age_group\b/.test(r.sql)) throw new Error("Derived age_group was emitted as a physical T6 column");
+    includes(r.sql, "MONTHS_BETWEEN(TO_DATE('31.12.' || t6.year, 'DD.MM.YYYY'), t6.birth_dt)");
+    includes(r.sql, "WHEN TRUNC(");
+    includes(r.sql, "THEN '65+'");
+  });
+  test("regular query can use one historical T6 year", () => {
+    const r = result(state(["t6_2026_edrpou"], { fields: [{ table: "t6_2026_edrpou", column: "kod_zo", agg: "" }], t6Years: [2023] }));
+    equal(r.errors.length, 0); includes(r.sql, "FROM vasiliuk_u.t6_2023_edrpou t6");
+  });
+  test("regular query combines selected T6 years before joins", () => {
+    const r = result(state(["t6_2026_edrpou", "pinsur_main"], { fields: [{ table: "t6_2026_edrpou", column: "kod_zo", agg: "" }], t6Years: [2025, 2026] }));
+    equal(r.errors.length, 0); includes(r.sql, "t6_selected_years AS"); includes(r.sql, "FROM t6_selected_years t6"); includes(r.sql, "JOIN ikis_ersp.pinsur_main im");
+  });
+  test("multi-year salary keeps technical APE position CTE", () => {
+    const r = result(state(["t6_2026_edrpou", "sm_ape4_5data"], {
+      metrics: ["avg_monthly_salary_period"], salaryGrain: "person_employer_month", semanticMode: "current", t6Years: [2025, 2026],
+      joins: [{ id: "t6_work_to_employment_ape45", selectedVariant: "position_as_of_t6_month" }]
+    }));
+    if (r.errors.length) throw new Error(r.errors.join(" | ")); includes(r.sql, "t6_selected_years AS"); includes(r.sql, "ape45_position_as_of_t6_month AS");
+    includes(r.sql, "FROM t6_selected_years t6_src"); includes(r.sql, "JOIN ape45_position_as_of_t6_month d5");
+  });
+  test("T6 year outside supported history is rejected", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["payroll"], t6Years: [2020] }));
+    if (!r.errors.length || r.sql) throw new Error("Unsupported T6 year accepted");
+  });
+  test("salary CTAS validates Oracle identifier", () => {
+    const r = result(state(["t6_2026_edrpou"], { metrics: ["avg_salary_month"], mode: "ctas", targetTable: "bad table" }));
+    if (!r.errors.length) throw new Error("Invalid CTAS identifier accepted");
+  });
+  test("controlled salary example equals expected values", () => {
+    const rows = [{ p: "A", m: 1, v: 10000 }, { p: "A", m: 2, v: 20000 }, { p: "B", m: 1, v: 30000 }];
+    const january = rows.filter(row => row.m === 1);
+    equal(january.reduce((sum, row) => sum + row.v, 0) / january.length, 20000);
+    equal(rows.reduce((sum, row) => sum + row.v, 0) / rows.length, 20000);
+    equal(rows.reduce((sum, row) => sum + row.v, 0) / new Set(rows.map(row => row.p)).size, 30000);
+  });
+  test("deterministic RC salary dataset matches all six metrics", () => {
+    SalaryControlDataset.cases.forEach((item) => {
+      const actual = SalaryControlDataset.metrics(item.rows, item.grain);
+      Object.keys(item.expected).forEach((metric) => equal(actual[metric], item.expected[metric], `${item.id}: ${metric}`));
+      if (item.employerGrainExpected) {
+        const employerActual = SalaryControlDataset.metrics(item.rows, "person_employer_month");
+        Object.keys(item.employerGrainExpected).forEach((metric) => equal(employerActual[metric], item.employerGrainExpected[metric], `${item.id} employer grain: ${metric}`));
+      }
+    });
+  });
+  test("duplicate current KVED fixture exposes payroll fanout", () => {
+    const item = SalaryControlDataset.cases.find((entry) => entry.id === "two_current_kved");
+    equal(item.rows[0].salary, item.expectedPayrollBeforeKved);
+    equal(item.rows[0].salary * item.currentKved.length, item.expectedPayrollAfterNaiveKvedJoin);
+  });
+
+  const failed = results.filter(x => !x.ok);
+  document.querySelector("#results").textContent = JSON.stringify({ passed: results.length - failed.length, failed: failed.length, results }, null, 2);
+  document.title = failed.length ? `FAIL ${failed.length}` : `PASS ${results.length}`;
+</script>
+</html>

@@ -1,257 +1,568 @@
 window.SqlBuilder = (function () {
-  function quoteValue(val, op) {
-    if (val === null || val === undefined) return "NULL";
-    const s = String(val).trim();
-    if (s === "") return "''";
-    if (op === "IN") {
-      return s
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean)
-        .map((p) => (/^-?\d+(\.\d+)?$/.test(p) ? p : `'${p.replace(/'/g, "''")}'`))
-        .join(", ");
+  const VALUE_OPS = new Set(["=", "!=", ">", ">=", "<", "<=", "LIKE", "LIKE_UPPER", "IN", "NOT IN", "BETWEEN"]);
+  const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_$#]*(\.[A-Za-z][A-Za-z0-9_$#]*)?$/;
+
+  function table(id) { return SQL_SCHEMA.getTable(id); }
+  function column(tableId, name) { const item = table(tableId); return item && item.columns.find((columnItem) => columnItem.name === name); }
+  function col(alias, name) { return `${alias}.${name}`; }
+  function escapeLiteral(value) { return `'${String(value).replace(/'/g, "''")}'`; }
+  function unique(values) { return [...new Set(values)]; }
+  function buildT6Source(state) {
+    const years = unique((Array.isArray(state.t6Years) && state.t6Years.length ? state.t6Years : [2026]).map(Number)).sort();
+    const invalid = years.filter((year) => !Number.isInteger(year) || year < 2021 || year > 2026);
+    if (invalid.length || !years.length) return { errors: ["Роки T6 мають бути в діапазоні 2021–2026."], sourceName: "", cte: "" };
+    const monthFrom = Math.max(1, Math.min(12, Number(state.t6MonthFrom) || 1));
+    const monthTo = Math.max(monthFrom, Math.min(12, Number(state.t6MonthTo) || 12));
+    const region = String(state.t6Region || "").trim();
+    const predicates = [];
+    if (monthFrom !== 1 || monthTo !== 12) predicates.push(`aped46_mnth BETWEEN ${monthFrom} AND ${monthTo}`);
+    if (region) predicates.push(`reg = ${escapeLiteral(region)}`);
+    const where = predicates.length ? `\n  WHERE ${predicates.join("\n    AND ")}` : "";
+    const physicalName = (year) => `vasiliuk_u.t6_${year}_edrpou`;
+    if (years.length === 1 && !where) return { errors: [], sourceName: physicalName(years[0]), cte: "", years };
+    const columns = (table("t6_2026_edrpou").columns || []).filter((item) => !item.derived).map((item) => item.name).join(", ");
+    const branches = years.map((year) => `SELECT ${columns}\n  FROM ${physicalName(year)}${where}`);
+    return { errors: [], sourceName: "t6_selected_years", cte: `t6_selected_years AS (\n  ${branches.join("\n  UNION ALL\n  ")}\n)`, years };
+  }
+  function reverseCardinality(value) {
+    return ({ "1:N": "N:1", "N:1": "1:N", "1:0..N": "0..N:1", "0..N:1": "1:0..N", "N:0..1": "0..1:N", "0..1:N": "N:0..1", "N:M": "M:N", "M:N": "N:M", "1:1": "1:1" })[value] || value;
+  }
+  function diagnostic(severity, code, message, affectedMetrics, action) {
+    return { severity, code, message, affectedMetrics: affectedMetrics || [], action: action || "" };
+  }
+  function replaceAliases(expression, aliases) {
+    return expression.replace(/\{([^}]+)\}/g, (_, id) => aliases[id] || `{${id}}`);
+  }
+  function t6AgeExpression(alias) {
+    return `TRUNC(MONTHS_BETWEEN(TO_DATE('31.12.' || ${alias}.year, 'DD.MM.YYYY'), ${alias}.birth_dt) / 12)`;
+  }
+  function t6AgeGroupExpression(alias) {
+    const age = t6AgeExpression(alias);
+    const clauses = (SQL_SCHEMA.ageGroups || []).map((group) => {
+      if (group.max == null) return `WHEN ${age} >= ${group.min} THEN ${escapeLiteral(group.label)}`;
+      if (group.min == null) return `WHEN ${age} < ${group.max + 1} THEN ${escapeLiteral(group.label)}`;
+      return `WHEN ${age} BETWEEN ${group.min} AND ${group.max} THEN ${escapeLiteral(group.label)}`;
+    });
+    return `CASE WHEN ${alias}.birth_dt IS NULL THEN NULL ${clauses.join(" ")} END`;
+  }
+  function columnExpression(tableId, name, aliases) {
+    const info = column(tableId, name);
+    if (info && info.semanticExpression && (info.requires || []).every((id) => aliases[id])) {
+      return replaceAliases(info.semanticExpression, aliases);
     }
-    if (op === "BETWEEN") {
-      const parts = s.split(",").map((p) => p.trim());
-      if (parts.length >= 2) {
-        const a = lit(parts[0]);
-        const b = lit(parts[1]);
-        return `${a} AND ${b}`;
-      }
-    }
-    if (/^-?\d+(\.\d+)?$/.test(s) && op !== "LIKE" && op !== "LIKE_UPPER") {
-      return s;
-    }
-    if (s.toUpperCase() === "NULL") return "NULL";
-    return lit(s);
+    if (tableId === "t6_2026_edrpou" && name === "age") return t6AgeExpression(aliases[tableId]);
+    if (tableId === "t6_2026_edrpou" && name === "age_group") return t6AgeGroupExpression(aliases[tableId]);
+    return col(aliases[tableId], name);
   }
-  function lit(s) {
-    if (/^-?\d+(\.\d+)?$/.test(String(s).trim())) return String(s).trim();
-    return `'${String(s).replace(/'/g, "''")}'`;
-  }
-  function colRef(alias, col) {
-    return `${alias}.${col}`;
-  }
-  function fieldBase(item, aliasOf) {
-    const alias = aliasOf[item.table];
-    if (!alias) return null;
-    return colRef(alias, item.column);
-  }
-  function fieldExpr(item, aliasOf, forOrder) {
-    const base = fieldBase(item, aliasOf);
-    if (!base) return null;
-    let expr = base;
-    const agg = item.agg || "";
-    if (agg === "COUNT_DISTINCT") expr = `COUNT(DISTINCT ${base})`;
-    else if (agg) expr = `${agg}(${base})`;
-    if (forOrder) return expr;
-    const label =
-      item.outAlias ||
-      item.alias ||
-      friendlyOutLabel(item);
-    if (label) {
-      const safe = String(label).replace(/"/g, '""');
-      expr = `${expr} AS "${safe}"`;
-    }
-    return expr;
-  }
-  function friendlyOutLabel(item) {
-    const t = SQL_SCHEMA.getTable(item.table);
-    const c = t?.columns.find((x) => x.name === item.column);
-    const base = c?.label || item.column;
-    const map = {
-      SUM: "Сума · ",
-      AVG: "Середнє · ",
-      COUNT: "Кількість · ",
-      COUNT_DISTINCT: "Унікальних · ",
-      MIN: "Мін · ",
-      MAX: "Макс · ",
-    };
-    const p = map[item.agg];
-    return p ? p + base : base;
-  }
+
   function assignAliases(tableIds) {
-    const aliasOf = {};
+    const aliases = {};
     const used = new Set();
-    tableIds.forEach((id) => {
-      const t = SQL_SCHEMA.getTable(id);
-      if (!t) return;
-      let a = t.defaultAlias;
-      let n = 1;
-      while (used.has(a)) {
-        a = t.defaultAlias + n;
-        n += 1;
-      }
-      used.add(a);
-      aliasOf[id] = a;
+    [...tableIds].sort().forEach((id) => {
+      const source = table(id);
+      if (!source) return;
+      let alias = source.defaultAlias;
+      let suffix = 2;
+      while (used.has(alias.toUpperCase())) alias = `${source.defaultAlias}${suffix++}`;
+      aliases[id] = alias;
+      used.add(alias.toUpperCase());
     });
-    return aliasOf;
+    return aliases;
   }
-  function buildJoins(state, aliasOf) {
-    const lines = [];
-    (state.joins || []).forEach((j) => {
-      const rightT = SQL_SCHEMA.getTable(j.rightTable);
-      if (!rightT) return;
-      const la = aliasOf[j.leftTable];
-      const ra = aliasOf[j.rightTable];
-      if (!la || !ra) return;
-      const jt = j.type || "INNER";
-      lines.push(
-        `${jt} JOIN ${rightT.fullName} ${ra}\n    ON ${colRef(la, j.leftCol)} = ${colRef(ra, j.rightCol)}`
-      );
-    });
-    return lines;
+
+  function normalizedEdges(state, catalog = SQL_SCHEMA.joins) {
+    const overrides = new Map((state.joins || []).filter((edge) => edge.id).map((edge) => [edge.id, edge]));
+    return catalog.map((catalogEdge) => {
+        const edge = { ...catalogEdge, ...(overrides.get(catalogEdge.id) || {}) };
+        const latestVariant = state.latestPersonOnly && !edge.selectedVariant
+          ? (edge.variants || []).find((item) => item.isLatest)
+          : null;
+        const variant = (edge.variants || []).find((item) => item.id === edge.selectedVariant) || latestVariant || (edge.variants || [])[0];
+        return {
+        id: edge.id,
+        left: edge.left || edge.leftTable,
+        right: edge.right || edge.rightTable,
+        conditions: (variant && variant.conditions) || edge.conditions || (edge.leftCol && edge.rightCol ? [{ leftCol: edge.leftCol, rightCol: edge.rightCol }] : []),
+        type: edge.type || "INNER",
+        cardinality: edge.cardinality || "N:M",
+        preferredRoot: edge.preferredRoot,
+        leftSource: (variant && variant.leftSource) || edge.leftSource,
+        rightSource: (variant && variant.rightSource) || edge.rightSource,
+        note: edge.note || "",
+        warning: edge.warning || "",
+        endpointsOnly: edge.endpointsOnly === true,
+        isDefault: edge.isDefault !== false,
+        weight: Number(edge.weight) || (edge.isDefault === false ? 20 : 5),
+        variants: edge.variants || [],
+        selectedVariant: (variant && variant.id) || "",
+        };
+      }).filter(function (edge) {
+        const left = table(edge.left);
+        const right = table(edge.right);
+        if (!left || !right || edge.externalTarget || edge.unresolvedExternal) return false;
+        const sourceColumns = function (side, sourceKey) {
+          const source = sourceKey && SQL_SCHEMA.sources && SQL_SCHEMA.sources[sourceKey];
+          return new Set((side.columns || []).map((item) => String(item.name).toLowerCase()).concat((source && source.columns) || []).map((name) => String(name).toLowerCase()));
+        };
+        const leftColumns = sourceColumns(left, edge.leftSource);
+        const rightColumns = sourceColumns(right, edge.rightSource);
+        return edge.conditions.length > 0 && edge.conditions.every((condition) => leftColumns.has(String(condition.leftCol).toLowerCase()) && rightColumns.has(String(condition.rightCol).toLowerCase()));
+      });
   }
-  function buildWhere(state, aliasOf) {
-    const parts = [];
-    (state.filters || []).forEach((f) => {
-      if (!f.table || !f.column || !f.op) return;
-      const alias = aliasOf[f.table];
-      if (!alias) return;
-      const left = colRef(alias, f.column);
-      const op = f.op;
-      if (op === "IS NULL" || op === "IS NOT NULL") {
-        parts.push(`${left} ${op}`);
-        return;
-      }
-      if (op === "IN") {
-        parts.push(`${left} IN (${quoteValue(f.value, op)})`);
-        return;
-      }
-      if (op === "BETWEEN") {
-        parts.push(`${left} BETWEEN ${quoteValue(f.value, op)}`);
-        return;
-      }
-      if (op === "LIKE") {
-        let v = String(f.value || "").trim();
-        if (!v.includes("%")) v = `%${v}%`;
-        parts.push(`${left} LIKE ${lit(v)}`);
-        return;
-      }
-      if (op === "LIKE_UPPER") {
-        let v = String(f.value || "").trim();
-        if (!v.includes("%")) v = `%${v}%`;
-        parts.push(`${left} LIKE UPPER(${lit(v)})`);
-        return;
-      }
-      parts.push(`${left} ${op} ${quoteValue(f.value, op)}`);
-    });
-    return parts;
+
+  function chooseRoot(selected, edges) {
+    const preferred = edges.map((edge) => edge.preferredRoot).filter((id) => selected.includes(id)).sort();
+    if (preferred.length) return preferred[0];
+    return [...selected].sort((a, b) => (((table(a) || {}).fullName || a).localeCompare((table(b) || {}).fullName || b)))[0];
   }
-  function buildGroupBy(state, aliasOf) {
-    const hasAgg = (state.fields || []).some((f) => f.agg);
-    if (!hasAgg) return [];
-    return (state.fields || [])
-      .filter((f) => !f.agg)
-      .map((f) => fieldBase(f, aliasOf))
-      .filter(Boolean);
-  }
-  function buildOrderBy(state, aliasOf) {
-    return (state.orderBy || [])
-      .map((o) => {
-        if (o.expr) return `${o.expr} ${o.dir || "ASC"}`;
-        if (o.fieldIndex != null && state.fields[o.fieldIndex]) {
-          const expr = fieldExpr(state.fields[o.fieldIndex], aliasOf, true);
-          return expr ? `${expr} ${o.dir || "ASC"}` : null;
-        }
-        const a = aliasOf[o.table];
-        if (!a || !o.column) return null;
-        let expr = colRef(a, o.column);
-        if (o.agg === "COUNT_DISTINCT") expr = `COUNT(DISTINCT ${expr})`;
-        else if (o.agg) expr = `${o.agg}(${expr})`;
-        return `${expr} ${o.dir || "ASC"}`;
-      })
-      .filter(Boolean);
-  }
-  function buildSelect(state) {
-    const selected = state.tables || [];
-    if (!selected.length) {
-      return "-- Крок 1: оберіть таблицю (таблиці)";
-    }
-    const aliasOf = assignAliases(selected);
-    const fields = state.fields || [];
-    let selectList;
-    if (!fields.length) {
-      selectList = ["*"];
-    } else {
-      selectList = fields.map((f) => fieldExpr(f, aliasOf, false)).filter(Boolean);
-      if (!selectList.length) selectList = ["*"];
-    }
-    const baseId = selected[0];
-    const base = SQL_SCHEMA.getTable(baseId);
-    const baseAlias = aliasOf[baseId];
-    const joinLines = buildJoins(state, aliasOf);
-    const where = buildWhere(state, aliasOf);
-    const groupBy = buildGroupBy(state, aliasOf);
-    const orderBy = buildOrderBy(state, aliasOf);
-    let fromSql;
-    if (joinLines.length > 0) {
-      fromSql = `FROM ${base.fullName} ${baseAlias}\n${joinLines
-        .map((l) => "  " + l)
-        .join("\n")}`;
-    } else if (selected.length === 1) {
-      fromSql = `FROM ${base.fullName} ${baseAlias}`;
-    } else {
-      const fromParts = selected.map(
-        (id) => `${SQL_SCHEMA.getTable(id).fullName} ${aliasOf[id]}`
-      );
-      fromSql = `FROM ${fromParts.join(",\n     ")}`;
-      suggestWhereJoins(selected, aliasOf).forEach((c) => where.unshift(c));
-    }
-    let sql = `SELECT\n       ${selectList.join(",\n       ")}\n${fromSql}`;
-    if (where.length) sql += `\n WHERE ${where.join("\n   AND ")}`;
-    if (groupBy.length) {
-      sql += `\n GROUP BY\n       ${groupBy.join(",\n       ")}`;
-    }
-    if (orderBy.length) sql += `\n ORDER BY ${orderBy.join(", ")}`;
-    const mode = state.mode || "select";
-    const target = (state.targetTable || "work_result").trim();
-    if (mode === "ctas") return `CREATE TABLE ${target} AS\n${sql};`;
-    if (mode === "drop_ctas") {
-      return `DROP TABLE ${target} PURGE;\n\nCREATE TABLE ${target} AS\n${sql};`;
-    }
-    return sql + ";";
-  }
-  function suggestWhereJoins(tableIds, aliasOf) {
-    const set = new Set(tableIds);
-    const conds = [];
-    SQL_SCHEMA.joins.forEach((j) => {
-      if (set.has(j.left) && set.has(j.right)) {
-        conds.push(
-          `${colRef(aliasOf[j.left], j.leftCol)} = ${colRef(aliasOf[j.right], j.rightCol)}`
-        );
-      }
-    });
-    return conds;
-  }
-  function suggestJoinsForTables(tableIds) {
-    const set = new Set(tableIds);
-    const result = [];
-    SQL_SCHEMA.joins.forEach((j) => {
-      if (set.has(j.left) && set.has(j.right)) {
-        result.push({
-          leftTable: j.left,
-          rightTable: j.right,
-          leftCol: j.leftCol,
-          rightCol: j.rightCol,
-          type: j.type || "INNER",
-          note: j.note || "",
-        });
-      }
-    });
-    if (tableIds.length >= 2 && !result.length) {
-      const a = tableIds[0];
-      const b = tableIds[1];
-      result.push({
-        leftTable: a,
-        rightTable: b,
-        leftCol: SQL_SCHEMA.getTable(a)?.columns[0]?.name || "",
-        rightCol: SQL_SCHEMA.getTable(b)?.columns[0]?.name || "",
-        type: "INNER",
-        note: "Оберіть поля з’єднання",
+
+  function shortestPath(startSet, target, edges) {
+    const queue = [...startSet].map((node) => ({ node, cost: 0, path: [], signature: "" }));
+    const best = new Map();
+    const solutions = [];
+    while (queue.length) {
+      queue.sort((a, b) => a.cost - b.cost || a.signature.localeCompare(b.signature));
+      const current = queue.shift();
+      if (current.cost > (best.has(current.node) ? best.get(current.node) : Infinity)) continue;
+      best.set(current.node, current.cost);
+      if (current.node === target) { solutions.push(current); continue; }
+      edges.filter((edge) => edge.isDefault && (edge.left === current.node || edge.right === current.node)).forEach((edge) => {
+        const next = edge.left === current.node ? edge.right : edge.left;
+        if (current.path.some((item) => item.edge.id === edge.id)) return;
+        const cost = current.cost + edge.weight;
+        if (cost > (best.has(next) ? best.get(next) : Infinity)) return;
+        const step = { edge, from: current.node, to: next };
+        queue.push({ node: next, cost, path: [...current.path, step], signature: `${current.signature}|${edge.id}` });
       });
     }
+    if (!solutions.length) return { path: null, ambiguous: false };
+    solutions.sort((a, b) => a.cost - b.cost || a.signature.localeCompare(b.signature));
+    const minimum = solutions[0].cost;
+    const tied = unique(solutions.filter((item) => item.cost === minimum).map((item) => item.signature));
+    return { path: solutions[0].path, ambiguous: tied.length > 1 };
+  }
+
+  function resolveJoinGraph(selectedTableIds, joinCatalog, overrides) {
+    const userTables = unique(selectedTableIds.filter((id) => table(id))).sort();
+    const state = { joins: overrides || [] };
+    const catalogEdges = joinCatalog
+      ? (joinCatalog.every((edge) => typeof edge.weight === "number" && typeof edge.isDefault === "boolean")
+        ? joinCatalog
+        : normalizedEdges(state, joinCatalog))
+      : normalizedEdges(state);
+    const errors = [];
+    const warnings = [];
+    if (!userTables.length) return { root: null, userTables, bridgeTables: [], allTables: [], edges: [], errors: ["Оберіть хоча б одне джерело."], warnings };
+    const edges = catalogEdges.filter((edge) => !edge.endpointsOnly || (userTables.includes(edge.left) && userTables.includes(edge.right)));
+    const root = chooseRoot(userTables, edges);
+    const connected = new Set([root]);
+    const resolved = new Map();
+    userTables.filter((id) => id !== root).sort().forEach((target) => {
+      if (connected.has(target)) return;
+      const found = shortestPath(connected, target, edges);
+      if (!found.path) { errors.push(`Неможливо знайти шлях до джерела «${(table(target) || {}).label || target}».`); return; }
+      if (found.ambiguous) { errors.push(`Для джерела «${(table(target) || {}).label || target}» існує кілька рівноцінних маршрутів. Виберіть семантичний маршрут.`); return; }
+      found.path.forEach((step) => { resolved.set(step.edge.id, step.edge); connected.add(step.from); connected.add(step.to); });
+    });
+    const allTables = [...connected].sort();
+    const bridgeTables = allTables.filter((id) => !userTables.includes(id));
+    return { root, userTables, bridgeTables, allTables, edges: [...resolved.values()], errors, warnings };
+  }
+
+  function buildJoinPlan(state, selected) {
+    const errors = [];
+    const warnings = [];
+    const ctes = [];
+    const graph = resolveJoinGraph(selected, normalizedEdges(state), state.joins);
+    if (graph.errors.length) return { ...graph, errors: graph.errors, warnings, ctes, joins: [], aliases: assignAliases(graph.allTables) };
+    const aliases = assignAliases(graph.allTables);
+    const edges = graph.edges;
+    const preferredRoots = edges.map((edge) => edge.preferredRoot).filter((id) => graph.allTables.includes(id));
+    const leftJoinRoots = edges.filter((edge) => edge.type === "LEFT").map((edge) => edge.left);
+    const root = preferredRoots.includes(graph.root) ? graph.root : (leftJoinRoots.sort()[0] || preferredRoots.sort()[0] || graph.root);
+    const visited = new Set([root]);
+    const joins = [];
+    while (visited.size < graph.allTables.length) {
+      const candidates = edges
+        .filter((edge) => visited.has(edge.left) !== visited.has(edge.right))
+        .sort((a, b) => {
+          const aNext = visited.has(a.left) ? a.right : a.left;
+          const bNext = visited.has(b.left) ? b.right : b.left;
+          return aNext.localeCompare(bNext) || `${a.left}:${a.right}`.localeCompare(`${b.left}:${b.right}`);
+        });
+      const edge = candidates[0];
+      if (!edge) {
+        const missing = graph.allTables.filter((id) => !visited.has(id)).map((id) => (table(id) || {}).label || id);
+        errors.push(`Неможливо зв’язати всі вибрані джерела. Без шляху залишилися: ${missing.join(", ")}. Додайте зв’язок у розширеному режимі або приберіть ці таблиці.`);
+        return { errors, warnings, ctes, root, joins: [] };
+      }
+      const forward = visited.has(edge.left);
+      const parent = forward ? edge.left : edge.right;
+      const child = forward ? edge.right : edge.left;
+      if (!edge.conditions.length) {
+        errors.push(`Для зв’язку ${edge.left} ↔ ${edge.right} не задано жодної умови.`);
+        return { errors, warnings, ctes, root, joins: [] };
+      }
+      const sourceKey = forward ? edge.rightSource : edge.leftSource;
+      const source = sourceKey && SQL_SCHEMA.sources ? SQL_SCHEMA.sources[sourceKey] : null;
+      if (source && source.cte && !ctes.includes(source.cte)) ctes.push(source.cte);
+      if (!forward && edge.type === "LEFT") {
+        errors.push(`Маршрут ${edge.left} → ${edge.right} потребує збереження напрямку LEFT JOIN. Змініть кореневе джерело або маршрут.`);
+        return { ...graph, errors, warnings, ctes, root, joins: [], aliases };
+      }
+      const joinType = edge.type === "RIGHT" ? "LEFT" : edge.type;
+      const conditions = edge.conditions.map((condition) => forward
+        ? `${col(aliases[parent], condition.leftCol)} = ${col(aliases[child], condition.rightCol)}`
+        : `${col(aliases[parent], condition.rightCol)} = ${col(aliases[child], condition.leftCol)}`);
+      joins.push({ table: child, sourceName: (source && source.from) || table(child).fullName, alias: aliases[child], type: joinType, conditions, edge, forward });
+      const orientedCardinality = forward ? edge.cardinality : reverseCardinality(edge.cardinality);
+      if (orientedCardinality.endsWith(":N") || orientedCardinality === "N:M") {
+        warnings.push(`Зв’язок ${(table(parent) || {}).label} → ${(table(child) || {}).label} має кардинальність ${orientedCardinality} і може розмножити рядки.`);
+      }
+      if (edge.warning) warnings.push(edge.warning);
+      visited.add(child);
+    }
+    for (const join of joins) {
+      const edge = join.edge;
+      const rootSourceKey = edge.left === root ? edge.leftSource : edge.right === root ? edge.rightSource : null;
+      const rootSource = rootSourceKey && SQL_SCHEMA.sources ? SQL_SCHEMA.sources[rootSourceKey] : null;
+      if (rootSource && rootSource.cte && !ctes.includes(rootSource.cte)) ctes.push(rootSource.cte);
+    }
+    const hasManyChain = joins.filter((join) => /(?:^|:)N|0\.\.N/.test(join.edge.cardinality)).length >= 2;
+    const diagnostics = [];
+    if (hasManyChain) diagnostics.push(diagnostic("warning", "FANOUT_RISK", "Маршрут містить кілька зв’язків один-до-багатьох і може розмножити рядки.", state.metrics || [], "Оберіть current або змініть зерно"));
+    if ((state.semanticMode === "current" || (state.presets || []).includes("current_insurer_profile")) && graph.allTables.includes("pinsur_kved")) {
+      diagnostics.push(diagnostic("warning", "CURRENT_KVED_UNIQUENESS", "Немає фізичного UNIQUE constraint для одного головного current-КВЕД. Зарплата може бути повторно віднесена до кількох КВЕД; загальний підсумок за КВЕД не вважайте достовірним до виконання контролю.", state.metrics || [], "Виконайте docs/control-current-kved-duplicates.sql і погодьте бізнес-правило"));
+    }
+    return { ...graph, errors, warnings: unique(warnings), diagnostics, ctes, root, joins, aliases };
+  }
+
+  function sourceForRoot(root, joins) {
+    for (const join of joins) {
+      const edge = join.edge;
+      if (edge.left === root && edge.leftSource) return SQL_SCHEMA.sources && SQL_SCHEMA.sources[edge.leftSource] && SQL_SCHEMA.sources[edge.leftSource].from;
+      if (edge.right === root && edge.rightSource) return SQL_SCHEMA.sources && SQL_SCHEMA.sources[edge.rightSource] && SQL_SCHEMA.sources[edge.rightSource].from;
+    }
+    return null;
+  }
+
+  function parseScalar(value, type, errors, label) {
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) { errors.push(`${label}: введіть значення.`); return null; }
+    if (type === "NUMBER") {
+      if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) { errors.push(`${label}: очікується число з крапкою як десятковим роздільником.`); return null; }
+      return raw;
+    }
+    if (type === "DATE") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) { errors.push(`${label}: дата має бути у форматі РРРР-ММ-ДД.`); return null; }
+      const [year, month, day] = raw.split("-").map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+        errors.push(`${label}: такої календарної дати не існує.`); return null;
+      }
+      return `DATE '${raw}'`;
+    }
+    return escapeLiteral(raw);
+  }
+
+  function buildFilters(state, aliases, errors) {
+    const result = [];
+    (state.filters || []).forEach((filter, index) => {
+      if (!filter.table || !filter.column || !filter.op) return;
+      const alias = aliases[filter.table];
+      if (!alias) return;
+      const info = column(filter.table, filter.column);
+      const label = `Фільтр ${index + 1} (${(info && info.label) || filter.column})`;
+      const left = columnExpression(filter.table, filter.column, aliases);
+      if (filter.op === "IS NULL" || filter.op === "IS NOT NULL") { result.push(`${left} ${filter.op}`); return; }
+      if (!VALUE_OPS.has(filter.op)) { errors.push(`${label}: невідомий оператор.`); return; }
+      const raw = String(filter.value == null ? "" : filter.value).trim();
+      if (!raw) { errors.push(`${label}: порожнє значення не допускається; використайте «порожнє / відсутнє».`); return; }
+      if (filter.op === "BETWEEN") {
+        const parts = raw.split(",").map((item) => item.trim());
+        if (parts.length !== 2 || parts.some((item) => !item)) { errors.push(`${label}: для діапазону введіть рівно два значення через кому.`); return; }
+        const from = parseScalar(parts[0], info && info.type, errors, `${label}, початок`);
+        const to = parseScalar(parts[1], info && info.type, errors, `${label}, кінець`);
+        if (from && to) result.push(`${left} BETWEEN ${from} AND ${to}`);
+        return;
+      }
+      if (filter.op === "IN" || filter.op === "NOT IN") {
+        const parts = raw.split(",").map((item) => item.trim());
+        if (!parts.length || parts.some((item) => !item)) { errors.push(`${label}: список містить порожнє значення.`); return; }
+        const values = parts.map((item) => parseScalar(item, info && info.type, errors, label));
+        if (values.every(Boolean)) result.push(`${left} ${filter.op} (${values.join(", ")})`);
+        return;
+      }
+      if (filter.op === "LIKE" || filter.op === "LIKE_UPPER") {
+        if (info && (info.type === "NUMBER" || info.type === "DATE")) { errors.push(`${label}: пошук тексту не можна застосувати до типу ${info.type}.`); return; }
+        const pattern = raw.includes("%") || raw.includes("_") ? raw : `%${raw}%`;
+        result.push(filter.op === "LIKE_UPPER" ? `UPPER(${left}) LIKE UPPER(${escapeLiteral(pattern)})` : `${left} LIKE ${escapeLiteral(pattern)}`);
+        return;
+      }
+      const value = parseScalar(raw, info && info.type, errors, label);
+      if (value) result.push(`${left} ${filter.op} ${value}`);
+    });
     return result;
   }
-  return { buildSelect, suggestJoinsForTables, fieldExpr, assignAliases };
+
+  function fieldExpression(item, aliases, withAlias, ctas, materializedDerived) {
+    const info = column(item.table, item.column);
+    const base = materializedDerived && info && info.derived ? col(aliases[item.table], item.column) : columnExpression(item.table, item.column, aliases);
+    let expression = item.agg === "COUNT_DISTINCT" ? `COUNT(DISTINCT ${base})` : item.agg ? `${item.agg}(${base})` : base;
+    if (!withAlias) return expression;
+    const alias = item.outAlias || item.alias || (ctas ? item.column : (info && info.label) || item.column);
+    return `${expression} AS "${String(alias).replace(/"/g, '""')}"`;
+  }
+
+  function metricExpression(id, aliases) {
+    const metric = (SQL_SCHEMA.metrics || []).find((item) => item.id === id);
+    if (!metric || metric.tables.some((tableId) => !aliases[tableId])) return null;
+    return { metric, expression: replaceAliases(metric.expression, aliases) };
+  }
+
+  function validateCtas(state, selected, fields, metrics, errors) {
+    if (!["ctas", "drop_ctas"].includes(state.mode)) return;
+    const target = String(state.targetTable || "").trim();
+    if (!IDENTIFIER.test(target)) errors.push("Назва CTAS-таблиці має бути коректним Oracle identifier: TABLE або SCHEMA.TABLE.");
+    if (!fields.length && !metrics.length && selected.length > 1) errors.push("SELECT * заборонено для CTAS із кількома джерелами. Оберіть колонки й задайте технічні аліаси.");
+    const aliases = fields.map((item) => item.outAlias || item.alias || item.column).concat(metrics.map((item) => item.metric.alias));
+    aliases.forEach((alias) => { if (!IDENTIFIER.test(alias)) errors.push(`Некоректний технічний аліас CTAS: ${alias}.`); });
+    const folded = aliases.map((alias) => alias.toUpperCase());
+    if (new Set(folded).size !== folded.length) errors.push("Технічні аліаси CTAS мають бути унікальними без урахування регістру.");
+  }
+
+  function buildSalaryMetric(state, selected, plan) {
+    const selectedSalaryMetrics = (SQL_SCHEMA.metrics || []).filter((metric) => metric.salaryMetric && (state.metrics || []).includes(metric.id));
+    const salaryMetric = selectedSalaryMetrics[0];
+    if (!salaryMetric) return null;
+    const isAnnualIncome = salaryMetric.id === "avg_annual_income_per_person";
+    let annualDimensions = [];
+    const companionMetricIds = ["payroll", "contributions", "people_count", "insurers_count", "rows_count"];
+    const companionMetrics = (state.metrics || []).filter((id) => companionMetricIds.includes(id)).map((id) => (SQL_SCHEMA.metrics || []).find((metric) => metric.id === id)).filter(Boolean);
+    const unsupportedMetricIds = (state.metrics || []).filter((id) => !selectedSalaryMetrics.some((metric) => metric.id === id) && !companionMetricIds.includes(id));
+    const errors = [...plan.errors];
+    const warnings = [...plan.warnings];
+    const diagnostics = [...(plan.diagnostics || [])];
+    const t6Source = buildT6Source(state);
+    errors.push(...t6Source.errors);
+    if (selectedSalaryMetrics.length > 1) errors.push("Одночасно можна вибрати лише один вид середньої зарплати.");
+    if (unsupportedMetricIds.length) errors.push("З вибраним зарплатним показником ці показники поки несумісні: " + unsupportedMetricIds.join(", ") + ".");
+    if (["ctas", "drop_ctas"].includes(state.mode) && !IDENTIFIER.test(String(state.targetTable || "").trim())) {
+      errors.push("Назва CTAS-таблиці має бути коректним Oracle identifier: TABLE або SCHEMA.TABLE.");
+    }
+    if (!selected.includes("t6_2026_edrpou")) errors.push("Зарплатний показник потребує джерело T6_2026_EDRPOU.");
+    if (isAnnualIncome) {
+      const incompatibleCompanions = companionMetrics.filter((metric) => !["people_count", "rows_count"].includes(metric.id));
+      if (incompatibleCompanions.length) errors.push("Фактичний середній річний дохід особи несумісний із показниками іншого зерна: " + incompatibleCompanions.map((metric) => metric.label).join(", ") + ".");
+      if (selected.some((id) => id !== "t6_2026_edrpou")) errors.push("Фактичний середній річний дохід особи поки не підтримує розрізи за КВЕД або іншими довідниками.");
+      const policy = salaryMetric.dimensionPolicy || {};
+      const compatibleDimensions = policy.compatible || [];
+      annualDimensions = unique((state.fields || []).filter((field) => !field.agg && field.table === "t6_2026_edrpou" && compatibleDimensions.includes(field.column)).map((field) => field.column));
+      const invalidDimensions = (state.fields || []).filter((field) => !field.agg && (field.table !== "t6_2026_edrpou" || !compatibleDimensions.includes(field.column)));
+      if (invalidDimensions.length) errors.push("Вибраний розріз не має однозначного значення на рівні особа–рік. Регіон, роботодавець і КВЕД потребують окремої семантичної політики.");
+      const invalidDirectOrder = (state.orderBy || []).filter((order) => order.fieldIndex == null && (order.table !== "t6_2026_edrpou" || !compatibleDimensions.includes(order.column)));
+      if (invalidDirectOrder.length) errors.push("Сортування річного доходу дозволене лише за сумісними колонками рівня особа–рік.");
+    }
+    const grain = state.salaryGrain === "person_employer_month" ? "person_employer_month" : "person_month";
+    if (companionMetrics.some((metric) => metric.id === "insurers_count") && grain !== "person_employer_month") {
+      errors.push("Кількість страхувальників потребує рівень «одна особа в одного страхувальника за місяць».");
+    }
+    if (grain === "person_month" && selected.some((id) => id !== "t6_2026_edrpou")) {
+      errors.push("Для довідників підприємства або КВЕД виберіть рівень «одна особа в одного страхувальника за місяць».");
+    }
+    const hasHistoryRisk = (plan.joins || []).some((join) => /:N$|N:M/.test(join.edge.cardinality));
+    const semanticMode = state.semanticMode || ((state.presets || []).includes("current_insurer_profile") ? "current" : null);
+    if (semanticMode && !['current', 'all_history'].includes(semanticMode)) errors.push("Непідтримуваний semantic mode. Доступні лише current та all_history.");
+    if (semanticMode === "all_history" && state.allHistoryConfirmed !== true) errors.push("Режим «Усі історичні версії» потребує явного підтвердження ризику розмноження рядків.");
+    if (hasHistoryRisk && semanticMode !== "current" && state.allHistoryConfirmed !== true) {
+      diagnostics.push(diagnostic("error", "FANOUT_RISK", "Історичний маршрут може розмножити зарплатні значення.", state.metrics || [], "Оберіть current або явно підтвердьте all_history"));
+    }
+    if (salaryMetric.id === "avg_annual_salary") {
+      const monthFilter = (state.filters || []).find((filter) => filter.table === "t6_2026_edrpou" && filter.column === "aped46_mnth" && filter.op === "BETWEEN");
+      if (!monthFilter || String(monthFilter.value).replace(/\s/g, "") !== "1,12") {
+        errors.push("Середньорічна зарплата вимагає повний календарний рік: місяць BETWEEN 1, 12.");
+      }
+    }
+    const safeRawDimensions = ["reg"];
+    const annualRawDimensions = unique((annualDimensions.includes("sex") ? ["sex"] : []).concat(annualDimensions.some((columnName) => ["birth_dt", "age", "age_group"].includes(columnName)) ? ["birth_dt"] : []));
+    const rawDimensionColumns = isAnnualIncome ? annualRawDimensions : unique((state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && safeRawDimensions.includes(field.column) && !field.agg).map((field) => field.column));
+    const unsupportedFields = isAnnualIncome ? [] : (state.fields || []).filter((field) => field.table === "t6_2026_edrpou" && !["year", "aped46_mnth", "kod_zo", "slb_im", "edrpou"].concat(safeRawDimensions).includes(field.column));
+    if (unsupportedFields.length) errors.push("Для зарплатної метрики поля сум і категорій не можна виводити до приведення до місячного зерна.");
+    if (diagnostics.some((item) => item.severity === "error")) diagnostics.filter((item) => item.severity === "error").forEach((item) => errors.push(item.message));
+    if (errors.length) return { sql: "", errors: unique(errors), warnings: unique(warnings), diagnostics, aliases: plan.aliases, graph: plan };
+
+    const rawErrors = [];
+    const rawState = Object.assign({}, state, { filters: (state.filters || []).filter((filter) => filter.table === "t6_2026_edrpou") });
+    const rawWhere = buildFilters(rawState, { t6_2026_edrpou: "t6_src" }, rawErrors);
+    if (rawErrors.length) return { sql: "", errors: rawErrors, warnings, aliases: plan.aliases, graph: plan };
+    const populationWhere = state.salaryPopulationRule === "positive_salary" ? "\n  WHERE salary_month > 0" : "";
+    const rawDimensionSelect = rawDimensionColumns.length ? ", " + rawDimensionColumns.map((columnName) => `t6_src.${columnName}`).join(", ") : "";
+    const rawDimensionNames = rawDimensionColumns.length ? ", " + rawDimensionColumns.join(", ") : "";
+    const rawDimensionGroup = rawDimensionColumns.length ? ", " + rawDimensionColumns.map((columnName) => `t6_src.${columnName}`).join(", ") : "";
+    const joinCtes = (plan.ctes || []).map((cte) => cte.replace(/vasiliuk_u\.t6_2026_edrpou/g, t6Source.sourceName));
+    const ctes = (t6Source.cte ? [t6Source.cte] : []).concat(joinCtes, [
+      `person_employer_month AS (\n  SELECT t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou${rawDimensionSelect},\n         SUM(NVL(t6_src.sum_narah, 0)) AS salary_month,\n         SUM(NVL(t6_src.sum_vrah, 0)) AS salary_counted_month,\n         SUM(NVL(t6_src.sum_narah_vnes, 0)) AS esv_month\n  FROM vasiliuk_u.t6_2026_edrpou t6_src${rawWhere.length ? `\n  WHERE ${rawWhere.join("\n    AND ")}` : ""}\n  GROUP BY t6_src.year, t6_src.aped46_mnth, t6_src.kod_zo, t6_src.slb_im, t6_src.edrpou${rawDimensionGroup}\n)`,
+      `person_month AS (\n  SELECT year, aped46_mnth, kod_zo${rawDimensionNames},\n         SUM(salary_month) AS salary_month,\n         SUM(salary_counted_month) AS salary_counted_month,\n         SUM(esv_month) AS esv_month\n  FROM person_employer_month\n  GROUP BY year, aped46_mnth, kod_zo${rawDimensionNames}\n)`,
+      `salary_population AS (\n  SELECT *\n  FROM ${grain}${populationWhere}\n)`
+    ]);
+    ctes[ctes.length - 3] = ctes[ctes.length - 3].replace("vasiliuk_u.t6_2026_edrpou", t6Source.sourceName);
+    let sourceName = "salary_population";
+    if (isAnnualIncome) {
+      const annualBaseDimensions = annualRawDimensions.length ? ", " + annualRawDimensions.join(", ") : "";
+      ctes.push(`person_year AS (\n  SELECT year, kod_zo${annualBaseDimensions}, SUM(salary_month) AS salary_year\n  FROM salary_population\n  GROUP BY year, kod_zo${annualBaseDimensions}\n)`);
+      sourceName = "person_year";
+      if (annualDimensions.includes("age") || annualDimensions.includes("age_group")) {
+        const ageExpression = "TRUNC(MONTHS_BETWEEN(TO_DATE('31.12.' || year, 'DD.MM.YYYY'), birth_dt) / 12)";
+        ctes.push(`person_year_age AS (\n  SELECT person_year.*, ${ageExpression} AS age\n  FROM person_year\n)`);
+        sourceName = "person_year_age";
+      }
+      if (annualDimensions.includes("age_group")) {
+        const ageGroupLines = (SQL_SCHEMA.ageGroups || []).map((group) => {
+          if (group.max == null) return `WHEN age >= ${group.min} THEN ${escapeLiteral(group.label)}`;
+          if (group.min == null) return `WHEN age < ${group.max + 1} THEN ${escapeLiteral(group.label)}`;
+          return `WHEN age BETWEEN ${group.min} AND ${group.max} THEN ${escapeLiteral(group.label)}`;
+        });
+        const ageGroupCase = `CASE\n         WHEN age IS NULL THEN NULL\n         ${ageGroupLines.join("\n         ")}\n       END`;
+        ctes.push(`person_year_dim AS (\n  SELECT person_year_age.*, ${ageGroupCase} AS age_group\n  FROM person_year_age\n)`);
+        sourceName = "person_year_dim";
+      }
+    }
+    const rootAlias = plan.aliases.t6_2026_edrpou;
+    let from = `FROM ${sourceName} ${rootAlias}`;
+    (plan.joins || []).forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
+    const outerState = Object.assign({}, state, { filters: (state.filters || []).filter((filter) => filter.table !== "t6_2026_edrpou") });
+    const outerWhere = buildFilters(outerState, plan.aliases, errors);
+    if (semanticMode === "current") (SQL_SCHEMA.semanticRules || []).filter((rule) => rule.mode === "current" && plan.allTables.includes(rule.table)).forEach((rule) => rule.predicates.forEach((expression) => outerWhere.push(replaceAliases(expression, plan.aliases))));
+    let formula = "SUM(t6.salary_month) / NULLIF(COUNT(*), 0)";
+    let mandatory = [];
+    if (salaryMetric.id === "avg_salary_month") mandatory = ["year", "aped46_mnth"];
+    if (salaryMetric.id === "median_monthly_salary_period") formula = "MEDIAN(t6.salary_month)";
+    if (salaryMetric.id === "avg_monthly_salary_year" || salaryMetric.id === "avg_annual_salary" || salaryMetric.id === "avg_annual_income_per_person") mandatory = ["year"];
+    if (salaryMetric.id === "avg_annual_salary") formula = "12 * SUM(t6.salary_month) / NULLIF(COUNT(*), 0)";
+    if (isAnnualIncome) formula = "SUM(t6.salary_year) / NULLIF(COUNT(*), 0)";
+    formula = formula.replace(/\bt6\./g, rootAlias + ".");
+    const dimensionItems = [];
+    const groupBy = [];
+    mandatory.forEach((columnName) => {
+      dimensionItems.push(`${rootAlias}.${columnName} AS "${columnName}"`);
+      groupBy.push(`${rootAlias}.${columnName}`);
+    });
+    (state.fields || []).forEach((field) => {
+      if (field.agg) return;
+      const expression = fieldExpression(field, plan.aliases, false, false, isAnnualIncome);
+      if (!groupBy.includes(expression)) {
+        dimensionItems.push(fieldExpression(field, plan.aliases, true, false, isAnnualIncome));
+        groupBy.push(expression);
+      }
+    });
+    const companionFormulas = {
+      payroll: `SUM(${rootAlias}.salary_month)`,
+      contributions: `SUM(${rootAlias}.esv_month)`,
+      people_count: `COUNT(DISTINCT ${rootAlias}.kod_zo)`,
+      insurers_count: `COUNT(DISTINCT ${rootAlias}.edrpou)`,
+      rows_count: "COUNT(*)"
+    };
+    if (isAnnualIncome) {
+      companionFormulas.people_count = "COUNT(*)";
+      companionFormulas.rows_count = "COUNT(*)";
+    }
+    const companionItems = companionMetrics.map((metric) => `${companionFormulas[metric.id]} AS "${metric.alias}"`);
+    const selectItems = dimensionItems.concat(companionItems, [`${formula} AS "${salaryMetric.alias}"`]);
+    let sql = `WITH\n  ${ctes.map((cte) => cte.replace(/\n/g, "\n  ")).join(",\n  ")}\nSELECT${state.parallel8 ? " /*+ PARALLEL(8) */" : ""}\n       ${selectItems.join(",\n       ")}\n${from}`;
+    if (outerWhere.length) sql += `\n WHERE ${outerWhere.join("\n   AND ")}`;
+    if (groupBy.length) sql += `\n GROUP BY\n       ${groupBy.join(",\n       ")}`;
+    const order = (state.orderBy || []).map((item) => {
+      if (item.fieldIndex != null && state.fields[item.fieldIndex]) return `${fieldExpression(state.fields[item.fieldIndex], plan.aliases, false, false, isAnnualIncome)} ${item.dir || "ASC"}`;
+      if (item.table && item.column && plan.aliases[item.table]) return `${isAnnualIncome && column(item.table, item.column) && column(item.table, item.column).derived ? col(plan.aliases[item.table], item.column) : columnExpression(item.table, item.column, plan.aliases)} ${item.dir || "ASC"}`;
+      return null;
+    }).filter(Boolean);
+    if (order.length) sql += `\n ORDER BY ${order.join(", ")}`;
+    sql += ";";
+    if (state.mode === "ctas") sql = `CREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    if (state.mode === "drop_ctas") {
+      warnings.push(`Увага: DROP TABLE ${state.targetTable.trim()} PURGE безповоротно видалить поточну таблицю.`);
+      sql = `DROP TABLE ${state.targetTable.trim()} PURGE;\n\nCREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    }
+    return { sql, errors: unique(errors), warnings: unique(warnings), diagnostics, appliedPredicates: unique(outerWhere), aliases: plan.aliases, graph: plan, salaryMetric };
+  }
+
+  function build(state) {
+    const selected = unique((state.tables || []).filter((id) => table(id))).sort();
+    const plan = buildJoinPlan(state, selected);
+    const aliases = plan.aliases;
+    const errors = [...plan.errors];
+    const warnings = [...plan.warnings];
+    const diagnostics = [...(plan.diagnostics || [])];
+    const t6Source = selected.includes("t6_2026_edrpou") ? buildT6Source(state) : { errors: [], sourceName: "", cte: "" };
+    errors.push(...t6Source.errors);
+    const semanticMode = state.semanticMode || ((state.presets || []).includes("current_insurer_profile") ? "current" : null);
+    if (semanticMode && !["current", "all_history"].includes(semanticMode)) errors.push("Непідтримуваний semantic mode. Доступні лише current та all_history.");
+    if (semanticMode === "all_history" && state.allHistoryConfirmed !== true) errors.push("Режим «Усі історичні версії» потребує явного підтвердження ризику розмноження рядків.");
+    if (errors.length) return { sql: "", errors, warnings, aliases, graph: plan };
+    const salaryResult = buildSalaryMetric(state, selected, plan);
+    if (salaryResult) return salaryResult;
+    if (t6Source.sourceName && t6Source.sourceName !== "vasiliuk_u.t6_2026_edrpou") {
+      plan.joins.forEach((join) => { if (join.table === "t6_2026_edrpou") join.sourceName = t6Source.sourceName; });
+      plan.ctes = (plan.ctes || []).map((cte) => cte.replace(/vasiliuk_u\.t6_2026_edrpou/g, t6Source.sourceName));
+      if (t6Source.cte) plan.ctes.unshift(t6Source.cte);
+    }
+    const fields = state.fields || [];
+    const metrics = (state.metrics || []).map((id) => metricExpression(id, aliases)).filter(Boolean);
+    validateCtas(state, selected, fields, metrics, errors);
+    const where = buildFilters(state, aliases, errors);
+    (SQL_SCHEMA.systemFilters || []).filter((rule) => (state.qualityProfiles || []).includes(rule.id)).forEach((rule) => {
+      if (rule.tables.every((id) => plan.allTables.includes(id))) rule.expressions.forEach((expression) => where.push(replaceAliases(expression, aliases)));
+    });
+    if (semanticMode === "current") (SQL_SCHEMA.semanticRules || []).filter((rule) => rule.mode === "current" && plan.allTables.includes(rule.table)).forEach((rule) => rule.predicates.forEach((expression) => where.push(replaceAliases(expression, aliases))));
+    if (errors.length) return { sql: "", errors: unique(errors), warnings, aliases };
+
+    const ctas = ["ctas", "drop_ctas"].includes(state.mode);
+    const selectItems = fields.map((item) => fieldExpression(item, aliases, true, ctas));
+    metrics.forEach(({ metric, expression }) => selectItems.push(`${expression} AS "${metric.alias}"`));
+    if (!selectItems.length) selected.forEach((id) => selectItems.push(`${aliases[id]}.*`));
+    const rootSource = plan.root === "t6_2026_edrpou" && t6Source.sourceName
+      ? t6Source.sourceName : (sourceForRoot(plan.root, plan.joins) || table(plan.root).fullName);
+    let from = `FROM ${rootSource} ${aliases[plan.root]}`;
+    plan.joins.forEach((join) => { from += `\n  ${join.type} JOIN ${join.sourceName} ${join.alias}\n    ON ${join.conditions.join("\n   AND ")}`; });
+    const groupBy = fields.filter((item) => !item.agg).map((item) => fieldExpression(item, aliases, false, ctas));
+    const hasAggregate = metrics.length || fields.some((item) => item.agg);
+    const selectKeyword = state.parallel8 ? "SELECT /*+ PARALLEL(8) */" : "SELECT";
+    let sql = `${selectKeyword}\n       ${selectItems.join(",\n       ")}\n${from}`;
+    if (where.length) sql += `\n WHERE ${unique(where).join("\n   AND ")}`;
+    if (hasAggregate && groupBy.length) sql += `\n GROUP BY\n       ${unique(groupBy).join(",\n       ")}`;
+    const order = (state.orderBy || []).map((item) => {
+      if (item.fieldIndex != null && fields[item.fieldIndex]) return `${fieldExpression(fields[item.fieldIndex], aliases, false, ctas)} ${item.dir || "ASC"}`;
+      if (item.table && item.column && aliases[item.table]) return `${col(aliases[item.table], item.column)} ${item.dir || "ASC"}`;
+      return null;
+    }).filter(Boolean);
+    if (order.length) sql += `\n ORDER BY ${order.join(", ")}`;
+    sql += ";";
+    if (plan.ctes.length) sql = `WITH\n${plan.ctes.map((cte) => `  ${cte.replace(/\n/g, "\n  ")}`).join(",\n")}\n${sql}`;
+    if (state.mode === "ctas") sql = `CREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    if (state.mode === "drop_ctas") {
+      warnings.push(`Увага: DROP TABLE ${state.targetTable.trim()} PURGE безповоротно видалить поточну таблицю перед створенням нової.`);
+      sql = `DROP TABLE ${state.targetTable.trim()} PURGE;\n\nCREATE TABLE ${state.targetTable.trim()} AS\n${sql}`;
+    }
+    return { sql, errors: [], warnings: unique(warnings), diagnostics, appliedPredicates: unique(where), semanticMode, aliases, graph: plan };
+  }
+
+  function buildSelect(state) {
+    const result = build(state);
+    if (result.errors.length) return result.errors.map((error) => `-- ПОМИЛКА: ${error}`).join("\n");
+    return result.sql;
+  }
+
+  function suggestJoinsForTables(tableIds) {
+    const selected = new Set(tableIds);
+    return SQL_SCHEMA.joins.filter((edge) => selected.has(edge.left) && selected.has(edge.right)).map((edge) => ({
+      id: edge.id,
+      leftTable: edge.left, rightTable: edge.right, conditions: edge.conditions.map((item) => ({ ...item })),
+      type: edge.type, cardinality: edge.cardinality, preferredRoot: edge.preferredRoot,
+      leftSource: edge.leftSource, rightSource: edge.rightSource, note: edge.note || "",
+      variants: (edge.variants || []).map((variant) => ({ ...variant, conditions: variant.conditions.map((item) => ({ ...item })) })),
+      selectedVariant: edge.variants && edge.variants[0] ? edge.variants[0].id : "",
+    }));
+  }
+
+  return { build, buildSelect, suggestJoinsForTables, assignAliases, resolveJoinGraph, reverseCardinality, normalizedEdges };
 })();

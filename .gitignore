@@ -18,3 +18,5 @@ _temp.docx
 .env
 .env.*
 *.pem
+# Local LLM experiment is outside SQLManager release scope
+local-llm/

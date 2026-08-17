@@ -22,6 +22,7 @@
           <button type="button" class="step-pill" data-step="3">3. Результат</button>
           <button type="button" class="step-pill" data-step="4">4. Фільтри</button>
           <button type="button" class="step-pill" data-step="5">5. SQL</button>
+          <button type="button" class="step-pill" data-step="6">6. Шаблони</button>
         </nav>
       </header>
 
@@ -35,6 +36,31 @@
               (Технічні імена таблиць БД лише дрібним текстом — для вас вони не
               обов’язкові.)
             </p>
+            <div class="block ready-reports">
+              <h3 class="block-title">Готові звіти</h3>
+              <p class="hint">Оберіть задачу — вона заповнить той самий перевірений конструктор. Параметри можна змінити на наступних кроках.</p>
+              <div class="template-settings-row ready-report-params">
+                <div class="t6-years-field">
+                  <span>Роки</span>
+                  <div id="ready-years" class="t6-year-options" role="group" aria-label="Роки таблиць T6">
+                    <label><input type="checkbox" value="2021" /> 2021</label>
+                    <label><input type="checkbox" value="2022" /> 2022</label>
+                    <label><input type="checkbox" value="2023" /> 2023</label>
+                    <label><input type="checkbox" value="2024" /> 2024</label>
+                    <label><input type="checkbox" value="2025" /> 2025</label>
+                    <label><input type="checkbox" value="2026" checked /> 2026</label>
+                  </div>
+                </div>
+                <label>З місяця <select id="ready-month-from"><option value="1">січень</option><option value="2">лютий</option><option value="3">березень</option><option value="4">квітень</option><option value="5">травень</option><option value="6">червень</option><option value="7">липень</option><option value="8">серпень</option><option value="9">вересень</option><option value="10">жовтень</option><option value="11">листопад</option><option value="12">грудень</option></select></label>
+                <label>По місяць <select id="ready-month-to"><option value="1">січень</option><option value="2">лютий</option><option value="3">березень</option><option value="4">квітень</option><option value="5">травень</option><option value="6">червень</option><option value="7">липень</option><option value="8">серпень</option><option value="9">вересень</option><option value="10">жовтень</option><option value="11">листопад</option><option value="12" selected>грудень</option></select></label>
+                <label>Регіон <select id="ready-region"></select></label>
+                <label>Одиниця розрахунку <select id="ready-grain"><option value="person_month" selected>одна особа за місяць</option><option value="person_employer_month">одна особа в одного роботодавця за місяць</option></select></label>
+                <label>Кого включати <select id="ready-population"><option value="reported">є нарахування за місяць</option><option value="positive_salary">зарплата більша за нуль</option></select></label>
+                <label>Які записи <select id="ready-semantic-mode"><option value="current">актуальні</option><option value="all_history">усі історичні версії</option></select></label>
+              </div>
+              <div id="ready-report-list" class="card-grid"></div>
+            </div>
+            <h3 class="block-title">Розширений конструктор</h3>
             <div class="toolbar">
               <input
                 id="search-tables"
@@ -43,6 +69,11 @@
                 style="max-width: 420px"
               />
               <span class="badge">Обрано: <span id="selected-count">0</span></span>
+            </div>
+            <div class="catalog-modes" id="catalog-modes" aria-label="Режим каталогу">
+              <button type="button" class="btn catalog-mode active" data-catalog-mode="core">Основні</button>
+              <button type="button" class="btn ghost catalog-mode" data-catalog-mode="business">Усі бізнес-таблиці</button>
+              <button type="button" class="btn ghost catalog-mode" data-catalog-mode="technical">Технічні</button>
             </div>
             <div class="selected-strip" id="selected-strip"></div>
             <div id="table-catalog"></div>
@@ -78,7 +109,24 @@
             <div class="block" id="joins-block">
               <h3 class="block-title">З’єднання джерел</h3>
               <p class="hint" id="joins-hint"></p>
+              <div id="bridge-info" class="hint"></div>
               <div id="joins-list"></div>
+            </div>
+            <div class="block">
+              <h3 class="block-title">Семантичні правила</h3>
+              <label>Режим даних
+                <select id="semantic-mode">
+                  <option value="current">Актуальний профіль</option>
+                  <option value="all_history">Усі історичні версії</option>
+                </select>
+              </label>
+              <label class="check-line" id="all-history-confirm-wrap" hidden><input id="all-history-confirmed" type="checkbox" /> Я розумію, що історичні версії можуть розмножити рядки та суми</label>
+              <p class="hint">Для актуального режиму застосовуються підтверджені правила статусів. Якщо вони не гарантують єдиний головний КВЕД, SQL покаже діагностику.</p>
+            </div>
+            <div class="block">
+              <h3 class="block-title">Якість даних</h3>
+              <label><input id="quality-accepted-packages" type="checkbox" /> Лише прийняті й актуальні пакети</label>
+              <p class="hint">Профіль видимий і застосовується тільки після вашого вибору.</p>
             </div>
           </section>
 
@@ -93,10 +141,30 @@
               рядки.
             </p>
 
+            <div class="block">
+              <h3 class="block-title">Готові показники</h3>
+              <p class="hint">Показники враховують зернистість і не підміняють кількість осіб кількістю рядків. Щоб прибрати вибраний показник, натисніть його кнопку повторно.</p>
+              <div id="metrics-list" class="quick-filters"></div>
+              <div id="salary-settings" class="semantic-settings" hidden>
+                <strong>Одиниця розрахунку</strong>
+                <label><input type="radio" name="salary-grain" value="person_month" checked /> одна особа за місяць</label>
+                <label><input type="radio" name="salary-grain" value="person_employer_month" /> одна особа в одного страхувальника за місяць</label>
+                <label>Активний працівник
+                  <select id="salary-population-rule">
+                    <option value="reported">є запис у T6 за місяць</option>
+                    <option value="positive_salary">місячна зарплата більша нуля</option>
+                  </select>
+                </label>
+                <div id="salary-metric-explain" class="hint"></div>
+              </div>
+            </div>
+
             <div class="result-builder" id="result-builder">
               <div class="result-col result-available">
                 <h3 class="col-head">Доступні поля</h3>
                 <p class="col-sub">Натисніть, щоб додати у відповідь →</p>
+                <label class="field-search-label" for="field-search">Пошук поля</label>
+                <input id="field-search" class="field-search" type="search" placeholder="Пошук поля..." aria-label="Пошук поля" autocomplete="off" />
                 <div id="fields-available"></div>
               </div>
               <div class="result-col result-chosen">
@@ -130,12 +198,23 @@
 
           
           <section class="panel" data-step="4">
-            <h2>Які рядки залишити?</h2>
+            <h2>
+              Які рядки залишити?
+              <button type="button" class="help-btn" id="zo-category-help" title="Довідник категорій ЗО" aria-haspopup="dialog" aria-controls="zo-category-dialog">?</button>
+            </h2>
             <p class="sub">
               Обмеження вибірки: конкретний код, період, «поле містить…», «не
               порожнє» тощо. Без умов — потраплять усі рядки, що підходять за
-              з’єднаннями.
+              з’єднаннями. Знак питання відкриває коди категорій ЗО.
             </p>
+            <label class="check-line">
+              <input id="filter-latest-person" type="checkbox" />
+              Лише остання картка особи за датою зміни
+            </label>
+            <label class="check-line">
+              <input id="use-parallel-8" type="checkbox" />
+              Використовувати Oracle hint PARALLEL(8)
+            </label>
             <div id="filters-list"></div>
             <div class="quick-filters" id="quick-filters"></div>
           </section>
@@ -151,6 +230,51 @@
             </p>
           </section>
 
+          <section class="panel" data-step="6">
+            <h2>Шаблони SQL</h2>
+            <p class="sub">
+              Тут зберігаються стандартизовані скрипти для створення таблиць,
+              вибірки даних та інших повторюваних задач.
+            </p>
+            <div class="template-settings" id="template-settings">
+              <div class="template-settings-row">
+                <label>
+                  Рік від
+                  <input id="tpl-year-start" type="number" min="2000" max="2100" value="2022" />
+                </label>
+                <label>
+                  Рік до
+                  <input id="tpl-year-end" type="number" min="2000" max="2100" value="2026" />
+                </label>
+                <label>
+                  Місяць від
+                  <input id="tpl-month-start" type="number" min="1" max="12" value="1" />
+                </label>
+                <label>
+                  Місяць до
+                  <input id="tpl-month-end" type="number" min="1" max="12" value="6" />
+                </label>
+                <label>
+                  OTK (1/0, лише T6)
+                  <select id="tpl-otk">
+                    <option value="any">Будь-яке</option>
+                    <option value="1">Так (1)</option>
+                    <option value="0">Ні (0)</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <h3 class="block-title saved-presets-title">Мої пресети конструктора</h3>
+            <p class="hint">Зберігаються лише у цьому браузері на цьому комп’ютері.</p>
+            <div class="preset-actions">
+              <button type="button" class="btn ghost" id="btn-export-presets">Експорт JSON</button>
+              <button type="button" class="btn ghost" id="btn-import-presets">Імпорт JSON</button>
+              <input type="file" id="preset-import-file" accept="application/json,.json" hidden />
+            </div>
+            <div id="saved-presets-list" class="presets"></div>
+            <div id="templates-list" class="presets"></div>
+          </section>
+
           <div class="nav">
             <button type="button" class="btn secondary" id="btn-back" disabled>
               Назад
@@ -164,10 +288,14 @@
           <p class="muted" style="margin: 0; font-size: 0.9rem">
             Оновлюється під час вибору на будь-якому кроці.
           </p>
+          <div id="sql-status" class="sql-status" role="alert" aria-live="polite"></div>
           <div class="sql-actions">
             <button type="button" class="btn" id="btn-copy">Копіювати</button>
             <button type="button" class="btn ghost" id="btn-download">
               Зберегти .sql
+            </button>
+            <button type="button" class="btn ghost" id="btn-save-preset">
+              Зберегти пресет
             </button>
             <button type="button" class="btn secondary" id="btn-reset">
               Почати спочатку
@@ -180,8 +308,38 @@
 
     <div class="toast" id="toast" role="status"></div>
 
+    <div class="help-overlay" id="zo-category-dialog" hidden>
+      <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="zo-category-title">
+        <div class="help-dialog-head">
+          <h3 id="zo-category-title">Категорії застрахованих осіб (ЗО)</h3>
+          <button type="button" class="help-close" id="zo-category-close" aria-label="Закрити">×</button>
+        </div>
+        <p class="help-dialog-note">Код категорії (<code>kat_zo</code> / <code>aped46_zo</code>) і хто це. Швидкі фільтри «Військові» та «Особи з інвалідністю» використовують позначені коди.</p>
+        <input id="zo-category-search" type="search" placeholder="Пошук за номером або назвою…" />
+        <div class="help-dialog-list" id="zo-category-list"></div>
+      </div>
+    </div>
+
+    <script>
+      window.addEventListener("error", function (event) {
+        var catalog = document.getElementById("table-catalog");
+        if (!catalog) return;
+        catalog.replaceChildren();
+        var message = document.createElement("p");
+        message.className = "error-message";
+        message.textContent = "Помилка запуску конструктора: " +
+          String(event.message || "невідома помилка JavaScript") +
+          " (рядок " + String(event.lineno || "?") + ")";
+        catalog.appendChild(message);
+      });
+    </script>
+    <script src="data/physical-schema.generated.js"></script>
     <script src="data/schema.js"></script>
+    <script src="data/catalog-ui.js"></script>
     <script src="js/sql-builder.js"></script>
+    <script src="js/template-utils.js"></script>
+    <script src="js/preset-store.js"></script>
+    <script src="js/wizard-state.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>
