@@ -788,14 +788,54 @@ select option {
   color: var(--muted);
 }
 .avail-group {
-  margin-bottom: 14px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
 }
 .avail-title {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text);
+  padding: 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.avail-title:hover,
+.avail-title:focus-visible {
+  background: rgba(42, 157, 143, 0.12);
+}
+.avail-title-text {
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.avail-title-summary {
   color: var(--muted);
-  margin-bottom: 8px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.avail-chevron {
+  color: var(--accent);
+}
+.avail-body {
+  padding: 10px 10px 2px;
+}
+.field-search-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.field-search {
+  width: 100%;
+  margin-bottom: 10px;
 }
 .avail-subgroup {
   margin-bottom: 10px;

@@ -29,6 +29,9 @@
     expandedCategories: new Set(),
   };
   let catalogRenderCount = 0;
+  const fieldAccordionState = new Map();
+  let fieldAccordionTableKey = "";
+  let fieldSearchQuery = "";
   const MAX_STEP = 6;
   const READY_REPORTS = [
     { id: "salary_kved_region", label: "Середня зарплата за регіоном і КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["avg_monthly_salary_period"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
@@ -484,13 +487,55 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       if (countEl) countEl.textContent = "0";
       return;
     }
+    const tableKey = state.tables.join("|");
+    if (tableKey !== fieldAccordionTableKey) {
+      fieldAccordionState.clear();
+      state.tables.forEach((id, index) => fieldAccordionState.set(id, index === 0));
+      fieldAccordionTableKey = tableKey;
+    }
+    const query = fieldSearchQuery.trim().toLocaleLowerCase("uk");
     state.tables.forEach((tid) => {
       const t = SQL_SCHEMA.getTable(tid);
+      const tableUi = t && window.SQL_CATALOG_UI && SQL_CATALOG_UI.get(t);
+      const tableTerms = [tLabel(tid), t && t.label, t && t.displayName, t && t.fullName, t && t.name]
+        .concat((t && t.keywords) || [], (t && t.aliases) || [], (tableUi && tableUi.keywords) || [], (tableUi && tableUi.aliases) || [])
+        .filter(Boolean).join(" ").toLocaleLowerCase("uk");
+      const availableColumns = (t.columns || []).filter((c) => {
+        if (!query) return true;
+        const terms = [c.label, c.name].concat(c.keywords || [], c.aliases || []).filter(Boolean).join(" ").toLocaleLowerCase("uk");
+        return tableTerms.includes(query) || terms.includes(query);
+      });
+      if (query && !availableColumns.length) return;
       const box = document.createElement("div");
       box.className = "avail-group";
-      box.innerHTML = `<div class="avail-title">${safeText(t.label)}</div>`;
+      box.dataset.fieldTableId = tid;
+      const selectedCount = state.fields.filter((field) => field.table === tid).length;
+      const expanded = query ? true : fieldAccordionState.get(tid) !== false;
+      const heading = document.createElement("button");
+      heading.type = "button";
+      heading.className = "avail-title";
+      heading.setAttribute("aria-expanded", String(expanded));
+      const chevron = document.createElement("span");
+      chevron.className = "avail-chevron";
+      chevron.setAttribute("aria-hidden", "true");
+      chevron.textContent = expanded ? "▼" : "▶";
+      const title = document.createElement("span");
+      title.className = "avail-title-text";
+      title.textContent = tLabel(tid);
+      const summary = document.createElement("span");
+      summary.className = "avail-title-summary";
+      summary.textContent = `${availableColumns.length} полів${selectedCount ? ` · ${selectedCount} вибрано` : ""}`;
+      heading.append(chevron, title, summary);
+      heading.addEventListener("click", () => {
+        if (!query) fieldAccordionState.set(tid, !expanded);
+        renderFields();
+      });
+      box.appendChild(heading);
+      const body = document.createElement("div");
+      body.className = "avail-body";
+      body.hidden = !expanded;
       const grouped = new Map();
-      (t.columns || []).forEach((c) => {
+      availableColumns.forEach((c) => {
         const group = SQL_SCHEMA.columnGroup ? SQL_SCHEMA.columnGroup(c) : { id: "other", label: "Інші поля" };
         if (!grouped.has(group.id)) grouped.set(group.id, { label: group.label, items: [] });
         grouped.get(group.id).items.push(c);
@@ -514,6 +559,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "avail-chip" + (already ? " used" : "");
+          btn.dataset.fieldId = `${tid}.${c.name}`;
+          btn.dataset.tableId = tid;
+          btn.dataset.columnName = c.name;
           btn.disabled = already;
           btn.innerHTML = already
             ? `<span>${safeText(c.label)}</span><span class="chip-tag">вже додано</span>`
@@ -535,8 +583,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
           chips.appendChild(btn);
         });
         subgroup.appendChild(chips);
-        box.appendChild(subgroup);
+        body.appendChild(subgroup);
       });
+      box.appendChild(body);
       avail.appendChild(box);
     });
     if (countEl) countEl.textContent = String(state.fields.length);
@@ -936,6 +985,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
   }
   function updateSql() {
     const sqlState = SQLWizardState.forStep(state, state.step);
+    sqlState.filters = (sqlState.filters || []).filter((filter) => {
+      const lookup = SQL_SCHEMA.lookupForColumn && SQL_SCHEMA.lookupForColumn(filter.table, filter.column);
+      return !(lookup && lookup.emptyMeansAll && !String(filter.value || "").trim());
+    });
     if (!sqlState.tables.length) {
       $("#sql-out").value = "";
       const status = $("#sql-status"); status.className = "sql-status"; status.replaceChildren();
@@ -1106,6 +1159,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       catalogQuery: "",
       expandedCategories: new Set(),
     });
+    fieldAccordionState.clear();
+    fieldAccordionTableKey = "";
+    fieldSearchQuery = "";
+    if ($("#field-search")) $("#field-search").value = "";
     $("#search-tables").value = "";
     setT6Years([2026]);
     $("#ready-month-from").value = "1";
@@ -1540,6 +1597,10 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       state.catalogQuery = e.target.value.trim();
       state.catalogLimit = 30;
       renderCatalog();
+    });
+    $("#field-search").addEventListener("input", (event) => {
+      fieldSearchQuery = event.target.value;
+      renderFields();
     });
     $("#catalog-modes").addEventListener("click", (event) => {
       const button = event.target.closest("[data-catalog-mode]");

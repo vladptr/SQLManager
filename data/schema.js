@@ -1051,7 +1051,7 @@ window.SQL_SCHEMA.getTable = function (id) {
     });
     var name = String(columnName || "").toLowerCase();
     if (/^(reg|ru_code|mrd_reg_code)$/.test(name)) {
-      return { id: "region", groups: schema.regionGroups, empty: "усі регіони / оберіть" };
+      return { id: "region", groups: schema.regionGroups, empty: "Всі регіони", emptyMeansAll: true };
     }
     if (/(^|_)mnth$|month/.test(name) && (!column || String(column.type).toUpperCase() === "NUMBER")) {
       return { id: "month", groups: [{ label: "Місяці", items: schema.months }], empty: "оберіть місяць" };
