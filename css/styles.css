@@ -29,8 +29,15 @@ body {
     radial-gradient(900px 500px at 100% 0%, rgba(233, 196, 106, 0.12), transparent 50%),
     linear-gradient(180deg, var(--bg0), #0c1015 60%, #0a0e12);
 }
-body {
-  min-height: 100vh;
+body.app-mode {
+  overflow-x: hidden;
+}
+body.app-mode .app {
+  max-width: none;
+  padding-top: 16px;
+}
+body.app-mode .top {
+  margin-bottom: 16px;
 }
 .app {
   width: 100%;

@@ -33,6 +33,18 @@
   let fieldAccordionTableKey = "";
   let fieldSearchQuery = "";
   const MAX_STEP = 6;
+  let sqlUpdateTimer = null;
+  let catalogRenderTimer = null;
+  let fieldRenderTimer = null;
+  function debounceTimer(store, fn, wait) {
+    if (store === "sql") clearTimeout(sqlUpdateTimer);
+    if (store === "catalog") clearTimeout(catalogRenderTimer);
+    if (store === "fields") clearTimeout(fieldRenderTimer);
+    const timer = setTimeout(fn, wait);
+    if (store === "sql") sqlUpdateTimer = timer;
+    if (store === "catalog") catalogRenderTimer = timer;
+    if (store === "fields") fieldRenderTimer = timer;
+  }
   const READY_REPORTS = [
     { id: "salary_kved_region", label: "Середня зарплата за регіоном і КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["avg_monthly_salary_period"], fields: [{ table: "t6_2026_edrpou", column: "reg", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
     { id: "people_kved_month", label: "Кількість осіб за місяцями та КВЕД", tables: ["t6_2026_edrpou", "nsi_kved"], metrics: ["people_count"], fields: [{ table: "t6_2026_edrpou", column: "aped46_mnth", agg: "" }, { table: "nsi_kved", column: "kvd_code", agg: "" }], grain: "person_employer_month" },
@@ -252,7 +264,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     };
     return window.SQL_CATALOG_UI;
   }
-  function renderCatalog() {
+  function renderCatalogNow() {
     ensureCatalogUi();
     catalogRenderCount += 1;
     const root = $("#table-catalog");
@@ -283,7 +295,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         more.type = "button";
         more.className = "btn ghost catalog-show-more";
         more.textContent = `Показати ще (${matches.length - state.catalogLimit})`;
-        more.addEventListener("click", function () { state.catalogLimit += 30; renderCatalog(); });
+        more.addEventListener("click", function () { state.catalogLimit += 30; renderCatalogNow(); });
         sec.appendChild(more);
       }
       fragment.appendChild(sec);
@@ -309,6 +321,9 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     }
     root.appendChild(fragment);
     updateCatalogSelectionState();
+  }
+  function renderCatalog() {
+    scheduleCatalogRender();
   }
   function compareCatalogTables(a, b) {
     const au = SQL_CATALOG_UI.get(a);
@@ -1031,7 +1046,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     });
     return row;
   }
-  function updateSql() {
+  function updateSqlNow() {
     const sqlState = SQLWizardState.forStep(state, state.step);
     sqlState.filters = (sqlState.filters || []).filter((filter) => {
       const lookup = SQL_SCHEMA.lookupForColumn && SQL_SCHEMA.lookupForColumn(filter.table, filter.column);
@@ -1059,6 +1074,19 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       status.appendChild(paragraph);
     });
     $("#sql-explain").innerHTML = buildExplain(result, sqlState);
+  }
+  function updateSql() {
+    debounceTimer("sql", updateSqlNow, 250);
+  }
+  function updateSqlImmediate() {
+    clearTimeout(sqlUpdateTimer);
+    updateSqlNow();
+  }
+  function scheduleCatalogRender() {
+    debounceTimer("catalog", renderCatalogNow, 180);
+  }
+  function scheduleFieldsRender() {
+    debounceTimer("fields", renderFieldsNow, 180);
   }
   function buildExplain(result, sqlState) {
     const current = sqlState || state;
@@ -1144,7 +1172,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         return;
       }
       if (state.step >= MAX_STEP) {
-        updateSql();
+        updateSqlImmediate();
         notify("SQL оновлено");
         return;
       }
@@ -1154,7 +1182,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     }
     onStepEnter();
     syncSteps();
-    updateSql();
+    updateSqlImmediate();
   }
   function onStepEnter() {
     if (state.step === 2) {
@@ -1176,7 +1204,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     state.step = n;
     onStepEnter();
     syncSteps();
-    updateSql();
+    updateSqlImmediate();
   }
   function resetAll() {
     Object.assign(state, {
@@ -1217,7 +1245,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#ready-month-to").value = "12";
     $("#ready-grain").value = "person_month";
     fillReadyRegionSelect("");
-    renderCatalog();
+    renderCatalogNow();
     renderSelectedStrip();
     renderModeUi();
     $("#semantic-mode").value = "current";
@@ -1227,7 +1255,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#filter-latest-person").checked = false;
     $("#use-parallel-8").checked = false;
     syncSteps();
-    updateSql();
+    updateSqlImmediate();
     notify("Очищено");
   }
   function renderTemplates() {
@@ -1328,7 +1356,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     state.salaryGrain = grain || report.grain; state.salaryPopulationRule = populationRule; state.semanticMode = semanticMode; state.allHistoryConfirmed = false; state.presets = semanticMode === "current" ? ["current_insurer_profile"] : [];
     $("#semantic-mode").value = semanticMode; $("#all-history-confirm-wrap").hidden = semanticMode !== "all_history"; $("#all-history-confirmed").checked = false;
     state.joins = report.route ? [{ id: "t6_work_to_employment_ape45", selectedVariant: report.route }] : [];
-    renderCatalog(); renderSelectedStrip(); updateSql(); notify("Готовий звіт застосовано");
+    renderCatalogNow(); renderSelectedStrip(); updateSqlImmediate(); notify("Готовий звіт застосовано");
   }
   function presetCompatible(saved) {
     return (saved.tables || []).every(function (id) { return !!SQL_SCHEMA.getTable(id); }) &&
@@ -1400,14 +1428,14 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
     $("#quality-accepted-packages").checked = state.qualityProfiles.includes("accepted_actual_packages");
     $("#filter-latest-person").checked = state.latestPersonOnly;
     $("#use-parallel-8").checked = state.parallel8;
-    renderCatalog();
+    renderCatalogNow();
     renderSelectedStrip();
     renderJoins();
     renderModeUi();
     renderFields();
     renderOrder();
     renderFilters();
-    updateSql();
+    updateSqlImmediate();
     notify("Пресет завантажено");
   }
   function loadTemplate(index) {
@@ -1660,7 +1688,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         item.classList.toggle("active", active);
         item.classList.toggle("ghost", !active);
       });
-      renderCatalog();
+      renderCatalogNow();
     });
     $("#table-catalog").addEventListener("click", (event) => {
       const category = event.target.closest("[data-category]");
@@ -1668,7 +1696,7 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
         const id = category.dataset.category;
         if (state.expandedCategories.has(id)) state.expandedCategories.delete(id);
         else state.expandedCategories.add(id);
-        renderCatalog();
+        renderCatalogNow();
         return;
       }
       const card = event.target.closest("[data-table-id]");
@@ -1680,28 +1708,28 @@ GROUP BY TO_CHAR(LPAD(spl.spl_ru, 2, 0)),
       bind();
       fillReadyRegionSelect(state.t6Region);
       renderReadyReports();
-      renderCatalog();
+      renderCatalogNow();
       renderSelectedStrip();
       renderModeUi();
       syncSteps();
-      updateSql();
+      updateSqlImmediate();
       window.SQLManagerApp = {
         getCatalogRenderCount: () => catalogRenderCount,
         getState: () => state,
         setCatalogMode: (mode) => {
           state.catalogMode = mode;
           if (mode === "technical") state.expandedCategories.add("technical");
-          renderCatalog();
+          renderCatalogNow();
         },
         setCatalogSearch: (query) => {
           state.catalogQuery = query || "";
           $("#search-tables").value = state.catalogQuery;
-          renderCatalog();
+          renderCatalogNow();
         },
         toggleCategory: (id) => {
           if (state.expandedCategories.has(id)) state.expandedCategories.delete(id);
           else state.expandedCategories.add(id);
-          renderCatalog();
+          renderCatalogNow();
         },
         toggleTable,
         goToStep,

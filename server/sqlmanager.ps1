@@ -1,8 +1,9 @@
 ﻿[CmdletBinding()]
-param([string]$ValidateSql, [string]$WorkerInput)
+param([string]$ValidateSql, [string]$WorkerInput, [switch]$NoBrowser)
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$ServerScriptPath = $MyInvocation.MyCommand.Path
 $Url = "http://127.0.0.1:8787/"
 $MaxRows = 100000
 $MaxRequestBytes = 2MB
@@ -202,71 +203,233 @@ if ($WorkerInput) {
   }
 }
 
-function Remove-QueryWork($ActiveQuery) {
-  if ($ActiveQuery) { Remove-Item -LiteralPath $ActiveQuery.inputPath, $ActiveQuery.outputPath, $ActiveQuery.metaPath -Force -ErrorAction SilentlyContinue }
-}
-function Stop-QueryProcess($ActiveQuery) {
-  if ($ActiveQuery -and -not $ActiveQuery.process.HasExited) {
-    Start-Process -FilePath "taskkill.exe" -ArgumentList @("/PID", [string]$ActiveQuery.process.Id, "/T", "/F") -Wait -NoNewWindow -ErrorAction SilentlyContinue | Out-Null
-  }
-}
-function Complete-Query($ActiveQuery) {
-  if (-not $ActiveQuery -or -not $ActiveQuery.process.HasExited) { return $false }
-  try {
-    if (-not (Test-Path -LiteralPath $ActiveQuery.metaPath)) { Send-Json $ActiveQuery.context 500 @{ error = "Процес Oracle завершився без результату." }; return $true }
-    $meta = ([IO.File]::ReadAllText($ActiveQuery.metaPath, [Text.Encoding]::UTF8) | ConvertFrom-Json)
-    if (-not $meta.ok) { Send-Json $ActiveQuery.context 400 @{ error = [string]$meta.error }; return $true }
-    $bytes = [IO.File]::ReadAllBytes($ActiveQuery.outputPath); $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    if ($ActiveQuery.format -eq "csv") { Send-Bytes $ActiveQuery.context $bytes "text/csv; charset=windows-1251" ("sqlmanager_$stamp.csv") ([bool]$meta.truncated) }
-    else { Send-Bytes $ActiveQuery.context $bytes "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ("sqlmanager_$stamp.xlsx") ([bool]$meta.truncated) }
-    return $true
-  } catch {
-    try { $ActiveQuery.context.Response.Abort() } catch {}
-    return $true
-  } finally { Remove-QueryWork $ActiveQuery }
+function Remove-JobArtifacts($Job) {
+  if (-not $Job) { return }
+  Remove-Item -LiteralPath $Job.inputPath, $Job.outputPath, $Job.metaPath -Force -ErrorAction SilentlyContinue
 }
 
-$listener = New-Object Net.HttpListener; $listener.Prefixes.Add($Url); $listener.Start()
-Write-Host "SQLManager server mode: $Url"; Start-Process $Url | Out-Null
-$activeQuery = $null
-while ($listener.IsListening) {
-  if ($activeQuery -and (Complete-Query $activeQuery)) { $activeQuery = $null }
-  $pendingContext = $listener.BeginGetContext($null, $null)
-  while (-not $pendingContext.AsyncWaitHandle.WaitOne(100)) {
-    if ($activeQuery -and (Complete-Query $activeQuery)) { $activeQuery = $null }
+function Stop-JobProcess($Job) {
+  if ($Job -and $Job.process -and -not $Job.process.HasExited) {
+    Start-Process -FilePath "taskkill.exe" -ArgumentList @("/PID", [string]$Job.process.Id, "/T", "/F") -Wait -NoNewWindow -ErrorAction SilentlyContinue | Out-Null
   }
-  $context = $listener.EndGetContext($pendingContext)
+}
+
+function Get-JobById([string]$JobId) {
+  if ([string]::IsNullOrWhiteSpace($JobId)) { return $null }
+  return $script:Jobs[$JobId]
+}
+
+function Sync-JobState($Job) {
+  if (-not $Job -or $Job.status -ne "running") { return $Job }
+  if (-not $Job.process.HasExited) { return $Job }
+  if (-not (Test-Path -LiteralPath $Job.metaPath)) {
+    $Job.status = "failed"
+    $Job.error = "Процес Oracle завершився без результату."
+  } else {
+    $meta = ([IO.File]::ReadAllText($Job.metaPath, [Text.Encoding]::UTF8) | ConvertFrom-Json)
+    if ($meta.ok) {
+      $Job.status = "completed"
+      $Job.truncated = [bool]$meta.truncated
+    } else {
+      $Job.status = "failed"
+      $Job.error = [string]$meta.error
+    }
+  }
+  if ($script:ActiveJobId -eq $Job.id) { $script:ActiveJobId = $null }
+  return $Job
+}
+
+function Start-ExportJob([string]$Sql, [string]$Format) {
+  if ($script:ActiveJobId) { throw "Інший запит уже виконується. Спочатку зупиніть його." }
+  $token = [guid]::NewGuid().ToString("N")
+  $inputPath = Join-Path $env:TEMP ("sqlmanager_query_" + $token + ".json")
+  $outputPath = Join-Path $env:TEMP ("sqlmanager_query_" + $token + ".bin")
+  $metaPath = Join-Path $env:TEMP ("sqlmanager_query_" + $token + ".meta.json")
+  @{ sql = $Sql; format = $Format; outputPath = $outputPath; metaPath = $metaPath } | ConvertTo-Json -Compress | Set-Content -LiteralPath $inputPath -Encoding UTF8
+  $scriptArgument = '"' + $ServerScriptPath + '"'
+  $inputArgument = '"' + $inputPath + '"'
+  $process = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptArgument, "-WorkerInput", $inputArgument) -PassThru -WindowStyle Hidden
+  $job = @{
+    id = $token
+    process = $process
+    inputPath = $inputPath
+    outputPath = $outputPath
+    metaPath = $metaPath
+    format = $Format
+    status = "running"
+    startedAt = [DateTime]::UtcNow
+    error = $null
+    truncated = $false
+  }
+  $script:Jobs[$token] = $job
+  $script:ActiveJobId = $token
+  return $job
+}
+
+function Test-OracleConnectionQuick() {
+  $credentials = Get-DbCredentials
+  return @{
+    ok = $true
+    database = "Oracle"
+    user = $credentials.user
+    connection = ($credentials.host + "/" + $credentials.service_name)
+    oracleChecked = $false
+  }
+}
+
+function Test-OracleConnectionFull() {
+  $credentials = Get-DbCredentials
+  [void](Invoke-OracleQuery "SELECT 1 AS ok FROM dual")
+  return @{
+    ok = $true
+    database = "Oracle"
+    user = $credentials.user
+    connection = ($credentials.host + "/" + $credentials.service_name)
+    oracleChecked = $true
+  }
+}
+
+$script:Jobs = @{}
+$script:ActiveJobId = $null
+$listener = New-Object Net.HttpListener
+$listener.Prefixes.Add($Url)
+$listener.Start()
+Write-Host "SQLManager: $Url"
+if (-not $NoBrowser) { Start-Process $Url | Out-Null }
+
+while ($listener.IsListening) {
+  $context = $listener.GetContext()
   try {
     $path = [Uri]::UnescapeDataString($context.Request.Url.AbsolutePath)
-    if ($context.Request.HttpMethod -eq "OPTIONS") { Set-Cors $context; $context.Response.StatusCode = 204; $context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type"; $context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"; $context.Response.Close(); continue }
+    $query = $context.Request.QueryString
+    if ($context.Request.HttpMethod -eq "OPTIONS") {
+      Set-Cors $context
+      $context.Response.StatusCode = 204
+      $context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type"
+      $context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+      $context.Response.Close()
+      continue
+    }
     if ($path -eq "/api/health" -and $context.Request.HttpMethod -eq "GET") {
-      try { $credentials = Get-DbCredentials; [void](Invoke-OracleQuery "SELECT 1 AS ok FROM dual"); Send-Json $context 200 @{ ok = $true; database = "Oracle"; user = $credentials.user; connection = ($credentials.host + "/" + $credentials.service_name) } }
-      catch { Send-Json $context 503 @{ ok = $false; error = $_.Exception.Message } }; continue
+      try {
+        $fullCheck = $query["full"] -eq "1"
+        $busy = -not [string]::IsNullOrWhiteSpace($script:ActiveJobId)
+        if ($fullCheck -and -not $busy) {
+          Send-Json $context 200 (Test-OracleConnectionFull)
+        } else {
+          $payload = Test-OracleConnectionQuick
+          if ($busy) { $payload.mode = "busy"; $payload.message = "Oracle-запит виконується. Підключення збережено." }
+          else { $payload.mode = "ready" }
+          Send-Json $context 200 $payload
+        }
+      } catch {
+        Send-Json $context 503 @{ ok = $false; error = $_.Exception.Message }
+      }
+      continue
     }
     if ($path -eq "/api/query/export" -and $context.Request.HttpMethod -eq "POST") {
-      if ($activeQuery) { Send-Json $context 409 @{ error = "Інший запит уже виконується. Спочатку зупиніть його." }; continue }
-      if ($context.Request.ContentLength64 -lt 0 -or $context.Request.ContentLength64 -gt $MaxRequestBytes) { Send-Json $context 413 @{ error = "Запит завеликий." }; continue }
-      $reader = New-Object IO.StreamReader($context.Request.InputStream, [Text.Encoding]::UTF8); $body = ($reader.ReadToEnd() | ConvertFrom-Json)
-      $format = ([string]$body.format).ToLowerInvariant(); if ($format -notin @("xlsx", "csv")) { Send-Json $context 400 @{ error = "Формат має бути xlsx або csv." }; continue }
-      [void](Test-ReadOnlySql ([string]$body.sql))
-      $token = [guid]::NewGuid().ToString("N"); $inputPath = Join-Path $env:TEMP ("sqlmanager_query_" + $token + ".json"); $outputPath = Join-Path $env:TEMP ("sqlmanager_query_" + $token + ".bin"); $metaPath = Join-Path $env:TEMP ("sqlmanager_query_" + $token + ".meta.json")
-      @{ sql = [string]$body.sql; format = $format; outputPath = $outputPath; metaPath = $metaPath } | ConvertTo-Json -Compress | Set-Content -LiteralPath $inputPath -Encoding UTF8
-      $scriptArgument = '"' + $MyInvocation.MyCommand.Path + '"'; $inputArgument = '"' + $inputPath + '"'
-      $process = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptArgument, "-WorkerInput", $inputArgument) -PassThru -WindowStyle Hidden
-      $activeQuery = @{ process = $process; context = $context; inputPath = $inputPath; outputPath = $outputPath; metaPath = $metaPath; format = $format }
+      if ($context.Request.ContentLength64 -lt 0 -or $context.Request.ContentLength64 -gt $MaxRequestBytes) {
+        Send-Json $context 413 @{ error = "Запит завеликий." }
+        continue
+      }
+      $reader = New-Object IO.StreamReader($context.Request.InputStream, [Text.Encoding]::UTF8)
+      $body = ($reader.ReadToEnd() | ConvertFrom-Json)
+      $format = ([string]$body.format).ToLowerInvariant()
+      if ($format -notin @("xlsx", "csv")) {
+        Send-Json $context 400 @{ error = "Формат має бути xlsx або csv." }
+        continue
+      }
+      try {
+        $sql = Test-ReadOnlySql ([string]$body.sql)
+        $job = Start-ExportJob $sql $format
+        Send-Json $context 202 @{ ok = $true; jobId = $job.id; status = "running" }
+      } catch {
+        Send-Json $context 400 @{ error = $_.Exception.Message }
+      }
+      continue
+    }
+    if ($path -eq "/api/query/status" -and $context.Request.HttpMethod -eq "GET") {
+      $job = Sync-JobState (Get-JobById ([string]$query["jobId"]))
+      if (-not $job) {
+        Send-Json $context 404 @{ error = "Запит не знайдено." }
+        continue
+      }
+      $elapsed = [math]::Max(0, [int]([DateTime]::UtcNow - $job.startedAt).TotalSeconds)
+      Send-Json $context 200 @{
+        ok = $true
+        jobId = $job.id
+        status = $job.status
+        elapsedSeconds = $elapsed
+        truncated = [bool]$job.truncated
+        error = if ($job.error) { [string]$job.error } else { $null }
+      }
+      continue
+    }
+    if ($path -eq "/api/query/download" -and $context.Request.HttpMethod -eq "GET") {
+      $job = Sync-JobState (Get-JobById ([string]$query["jobId"]))
+      if (-not $job) {
+        Send-Json $context 404 @{ error = "Запит не знайдено." }
+        continue
+      }
+      if ($job.status -eq "running") {
+        Send-Json $context 409 @{ error = "Запит ще виконується." }
+        continue
+      }
+      if ($job.status -ne "completed") {
+        Send-Json $context 400 @{ error = if ($job.error) { [string]$job.error } else { "Запит не завершився успішно." } }
+        continue
+      }
+      if (-not (Test-Path -LiteralPath $job.outputPath)) {
+        Send-Json $context 500 @{ error = "Файл результату не знайдено." }
+        continue
+      }
+      $bytes = [IO.File]::ReadAllBytes($job.outputPath)
+      $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+      if ($job.format -eq "csv") {
+        Send-Bytes $context $bytes "text/csv; charset=windows-1251" ("sqlmanager_$stamp.csv") ([bool]$job.truncated)
+      } else {
+        Send-Bytes $context $bytes "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ("sqlmanager_$stamp.xlsx") ([bool]$job.truncated)
+      }
+      Remove-JobArtifacts $job
+      $script:Jobs.Remove($job.id) | Out-Null
       continue
     }
     if ($path -eq "/api/query/cancel" -and $context.Request.HttpMethod -eq "POST") {
-      if (-not $activeQuery) { Send-Json $context 409 @{ ok = $false; error = "Активного запиту немає." }; continue }
-      Stop-QueryProcess $activeQuery
-      try { Send-Json $activeQuery.context 409 @{ error = "Запит зупинено користувачем." } } catch {}
-      Remove-QueryWork $activeQuery; $activeQuery = $null
-      Send-Json $context 200 @{ ok = $true; message = "Запит зупинено." }; continue
+      $reader = New-Object IO.StreamReader($context.Request.InputStream, [Text.Encoding]::UTF8)
+      $payloadText = $reader.ReadToEnd()
+      $requestedId = $null
+      if ($payloadText) {
+        try { $requestedId = [string](($payloadText | ConvertFrom-Json).jobId) } catch {}
+      }
+      $jobId = if ($requestedId) { $requestedId } else { $script:ActiveJobId }
+      $job = Get-JobById $jobId
+      if (-not $job -or $job.status -ne "running") {
+        Send-Json $context 409 @{ ok = $false; error = "Активного запиту немає." }
+        continue
+      }
+      Stop-JobProcess $job
+      $job.status = "failed"
+      $job.error = "Запит зупинено користувачем."
+      if ($script:ActiveJobId -eq $job.id) { $script:ActiveJobId = $null }
+      Remove-JobArtifacts $job
+      $script:Jobs.Remove($job.id) | Out-Null
+      Send-Json $context 200 @{ ok = $true; message = "Запит зупинено." }
+      continue
     }
-    if ($path.StartsWith("/api/")) { Send-Json $context 404 @{ error = "API endpoint не знайдено." }; continue }
+    if ($path.StartsWith("/api/")) {
+      Send-Json $context 404 @{ error = "API endpoint не знайдено." }
+      continue
+    }
     if ($path -eq "/") { $path = "/index.html" }
-    $relative = $path.TrimStart('/').Replace('/', [IO.Path]::DirectorySeparatorChar); $file = [IO.Path]::GetFullPath((Join-Path $ProjectRoot $relative)); $rootPrefix = [IO.Path]::GetFullPath($ProjectRoot) + [IO.Path]::DirectorySeparatorChar
-    if (-not $file.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $file -PathType Leaf)) { Send-Json $context 404 @{ error = "Файл не знайдено." }; continue }
+    $relative = $path.TrimStart('/').Replace('/', [IO.Path]::DirectorySeparatorChar)
+    $file = [IO.Path]::GetFullPath((Join-Path $ProjectRoot $relative))
+    $rootPrefix = [IO.Path]::GetFullPath($ProjectRoot) + [IO.Path]::DirectorySeparatorChar
+    if (-not $file.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $file -PathType Leaf)) {
+      Send-Json $context 404 @{ error = "Файл не знайдено." }
+      continue
+    }
     Send-StaticFile $context $file
-  } catch { try { Send-Json $context 400 @{ error = $_.Exception.Message } } catch {} }
+  } catch {
+    try { Send-Json $context 400 @{ error = $_.Exception.Message } } catch {}
+  }
 }

@@ -1,0 +1,2 @@
+C:\Users\Vlad\Desktop\GITProject\SQLManager\app\desktop\publish\SQLManager.Desktop.pdb
+C:\Users\Vlad\Desktop\GITProject\SQLManager\app\desktop\publish\SQLManager.Desktop.exe

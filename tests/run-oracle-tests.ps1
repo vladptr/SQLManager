@@ -32,7 +32,7 @@ $testFile = (Resolve-Path "$PSScriptRoot\oracle-export.test.html").Path.Replace(
 $profile = Join-Path $env:TEMP ("sqlmanager-oracle-tests-" + [guid]::NewGuid())
 $stdout = Join-Path $env:TEMP ("sqlmanager-oracle-tests-" + [guid]::NewGuid() + ".out")
 $stderr = Join-Path $env:TEMP ("sqlmanager-oracle-tests-" + [guid]::NewGuid() + ".err")
-$arguments = @("--headless=new", "--no-sandbox", "--disable-gpu", "--allow-file-access-from-files", "--virtual-time-budget=5000", "--user-data-dir=$profile", "--dump-dom", "file:///$testFile")
+$arguments = @("--headless=new", "--no-sandbox", "--disable-gpu", "--allow-file-access-from-files", "--virtual-time-budget=15000", "--user-data-dir=$profile", "--dump-dom", "file:///$testFile")
 Start-Process -FilePath $browser -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr | Out-Null
 $html = Get-Content -Raw -LiteralPath $stdout
 $match = [regex]::Match($html, '<pre id="results">([\s\S]*?)</pre>')
